@@ -5,6 +5,7 @@ import Data.List (sort)
 import qualified Data.Map.Strict as Map
 import Solitaire.Engine
 import Solitaire.Games (freecell, games, klondike, spider)
+import Solitaire.Solver (SearchResult(..), solve)
 import System.Exit (die)
 
 main :: IO ()
@@ -14,6 +15,8 @@ main = do
   spiderRules
   freecellRules
   winningMoves
+  solverLimits
+  solveInitialDeal
   putStrLn "All solitaire checks passed."
 
 initialDeals :: IO ()
@@ -149,12 +152,42 @@ winningMoves = do
            goal 3 Hearts King, goal 4 Spades Queen]
     end <- succeed (applyAction def board (Move 1 (tableau 1) (foundation 4)))
     check (gameName def ++ " recognizes the last foundation move") (not (won def board) && won def end)
+    let beforeQueen = Map.insert (tableau 1) [up Queen Spades, up King Spades]
+                    $ Map.adjust (drop 1) (foundation 4) board
+    checkSolution def beforeQueen
+    check "An already won board needs no search budget" (solve 0 def end == Solved [])
   let suits = init (deckSuits spider)
       board = Map.fromList $
         [(foundation n, [up r s | r <- [Ace .. King]]) | (n, s) <- zip [1 ..] suits] ++
         [(foundation 8, []), (tableau 1, [up Ace Spades]), (tableau 2, [up r Spades | r <- [Two .. King]])]
   end <- succeed (applyAction spider board (Move 1 (tableau 1) (tableau 2)))
   check "Spider recognizes the eighth completed sequence" (not (won spider board) && won spider end)
+  checkSolution spider board
+
+checkSolution :: Definition -> Board -> IO ()
+checkSolution def board = do
+  check "An unfinished board needs a search budget" (solve 0 def board == LimitReached)
+  case solve 16 def board of
+    Solved actions -> do
+      end <- succeed (foldM (applyAction def) board actions)
+      check (gameName def ++ " solver actions reach a winning board") (not (null actions) && won def end)
+    _ -> die ("FAILED: " ++ gameName def ++ " solver did not find a solution.")
+
+solverLimits :: IO ()
+solverLimits = do
+  let onlyDraw = klondike {deckSuits = [Spades], initialDeal = [], transfers = []}
+  board <- succeed (newGame onlyDraw 42)
+  check "Search budget can stop a reachable draw cycle" (solve 1 onlyDraw board == LimitReached)
+  check "Solver detects repeated boards and exhausts the draw cycle" (solve 16 onlyDraw board == Exhausted)
+
+solveInitialDeal :: IO ()
+solveInitialDeal = do
+  board <- succeed (newGame klondike 7)
+  case solve 3500 klondike board of
+    Solved actions -> do
+      end <- succeed (foldM (applyAction klondike) board actions)
+      check "Klondike solver wins from a seeded initial deal" (won klondike end)
+    _ -> die "FAILED: Klondike solver did not solve seed 7."
 
 up :: Rank -> Suit -> Entry
 up r s = Entry Up (Card r s)

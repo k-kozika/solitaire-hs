@@ -3,7 +3,7 @@ module Solitaire.Engine
   , Group(..), Pile(..), Board
   , Relation(..), Sequence(..), Placement(..), MoveLimit(..), Transfer(..)
   , StockRule(..), Automatic(..), Definition(..), Action(..)
-  , newGame, applyAction, legalActions, won, pileCards, pilesIn
+  , newGame, applyAction, legalActions, legalTransitions, won, goalProgress, pileCards, pilesIn
   ) where
 
 import Control.Monad (foldM, unless)
@@ -22,8 +22,8 @@ data Rank = Ace | Two | Three | Four | Five | Six | Seven
 data Card = Card { rank :: Rank, suit :: Suit }
   deriving (Eq, Ord, Show)
 
-data Face = Down | Up deriving (Eq, Show)
-data Entry = Entry Face Card deriving (Eq, Show)
+data Face = Down | Up deriving (Eq, Ord, Show)
+data Entry = Entry Face Card deriving (Eq, Ord, Show)
 
 data Group = Stock | Waste | Tableau | Foundation | Cell
   deriving (Eq, Ord, Show)
@@ -242,16 +242,25 @@ settle rules board = foldl' (flip perform) board rules
     reveal [] = []
 
 legalActions :: Definition -> Board -> [Action]
-legalActions def board = filter legal (Draw : moves)
+legalActions def board = map fst (legalTransitions def board)
+
+legalTransitions :: Definition -> Board -> [(Action, Board)]
+legalTransitions def board =
+  [(action, next) | action <- Draw : moves, Right next <- [applyAction def board action]]
   where
-    legal action = case applyAction def board action of
-      Right _ -> True
-      Left _ -> False
+    routes = [(from, to) | Transfer from to _ _ <- transfers def]
     moves = [ Move count source target
-            | source <- Map.keys board, target <- Map.keys board, source /= target
-            , count <- [1 .. length (takeWhile exposed (pileCards board source))] ]
+            | (source, entries) <- Map.toList board
+            , let visibleCount = length (takeWhile exposed entries)
+            , visibleCount > 0
+            , target <- Map.keys board
+            , source /= target, (pileGroup source, pileGroup target) `elem` routes
+            , count <- [1 .. visibleCount] ]
     exposed (Entry face _) = face == Up
 
 won :: Definition -> Board -> Bool
-won def board =
-  sum (map (length . pileCards board) (pilesIn (goalGroup def) board)) == length (deck def)
+won def board = goalProgress def board == length (deck def)
+
+goalProgress :: Definition -> Board -> Int
+goalProgress def board =
+  sum (map (length . pileCards board) (pilesIn (goalGroup def) board))
