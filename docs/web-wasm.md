@@ -1,6 +1,22 @@
 # Web and WebAssembly development
 
-The WebAssembly build exports the Haskell engine through `ghc-wasm-bindgen`. The frontend in [web/](../web/) uses Vite, Preact, and TypeScript. Its current app is the starter screen; a playable browser interface is not implemented yet.
+The WebAssembly build exports the Haskell engine through `ghc-wasm-bindgen`. The frontend in [web/](../web/) uses Vite, Preact, and TypeScript to play all six registered solitaire games. The Haskell engine remains the source of truth for legal moves and victory.
+
+## Playing in the browser
+
+Choose a game in the opening dialog and optionally enter an unsigned 64-bit decimal seed. An empty seed creates a random deal; the actual seed appears above the board. The same game and seed reproduce the same deal.
+
+Select a card or a face-up group, then select a marked destination. Desktop users can also drag cards to legal destinations. Only legal card selections, destinations, and stock actions are enabled. On narrow screens, scroll inside the card table to reach other columns. All moves also work with Tab and Enter/Space; Escape clears the selection.
+
+The timer measures elapsed time from dealing until victory, including time in other tabs or the new-game dialog. Each successful move or stock action counts as one move. Automatic reveals and collections do not add moves.
+
+**Undo** (Ctrl+Z / Cmd+Z) restores the position before the last move or stock action, including automatic reveals, collected runs, and stock recycling. Undo is repeatable back to the initial deal and reduces the move count; elapsed time is not rewound. The restored position is analyzed again and its old hint is cleared. Undoing the last move of a won game resumes play and the timer. A new deal clears the undo history. Shortcuts leave text editing in the settings dialog alone.
+
+The background solver runs in a separate Web Worker after each board change. Its states are **Analyzing**, **Winning path found**, **No winning path**, and **Unable to determine**. Only an exhaustive search establishes that there is no winning path. The default limits are 3,500 expanded boards and five seconds of search time, configured in `web/src/analysis.ts`. Worker initialization has a separate 15-second deadline. A budget or time limit leaves the position undetermined; a worker error leaves gameplay available.
+
+**Hint** highlights the first action of a discovered winning path without making the move. Analysis includes the identities of face-down cards. Changing the board cancels its old search and invalidates its hint; old worker results cannot update the new position.
+
+After victory, **Another deal** starts the same game with a different random seed. **New Game** opens the game/seed selector. **Undo last move** returns to the position before victory. Closing the results lets you inspect the final board. There is no persistence or automatic solution playback.
 
 ## Toolchain
 
@@ -111,6 +127,18 @@ bun run preview
 | `web/dist/` | Frontend production output |
 
 Generated binding files are ignored by Git. Edit [Solitaire.Wasm](../src/Solitaire/Wasm.hs) or the underlying engine and regenerate them. See [the API guide](wasm-api.md) for import paths and data representations.
+
+## Frontend checks
+
+From `web/`:
+
+```sh
+bun run test
+bun run test:wasm
+bun run build
+```
+
+The first command checks seed parsing, legal selections, session accounting, and worker cancellation and stale-result handling. `test:wasm` requires generated bindings and Node.js 22.18 or later (for built-in TypeScript type stripping). It exercises all games through the actual Wasm facade and replays the winning path for Klondike seed 7. `build` regenerates Wasm, checks TypeScript, and bundles the application and module worker.
 
 ## Troubleshooting
 

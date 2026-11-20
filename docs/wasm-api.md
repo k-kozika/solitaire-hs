@@ -132,7 +132,7 @@ type SearchResult =
 
 The `Solved.contents` array is already in execution order. Replay it with `applyAction` and the same game ID. `LimitReached` means the expansion budget was consumed, not that the game is unwinnable. See [solver semantics](solver.md) for budget accounting and search limitations.
 
-`solve` blocks the calling thread until it returns. For a browser UI, initialize the module and perform search in a Web Worker. Exchanging requests and results, handling cancellation, and keeping a worker result synchronized with the current board belong to the caller; this repository does not yet include a worker implementation.
+`solve` blocks the calling thread until it returns. For a browser UI, initialize the module and perform search in a Web Worker. The frontend's [analysis worker](../web/src/analysis.worker.ts) and [client](../web/src/analysis.ts) implement this: requests carry the game ID, board, and board revision; stale replies are ignored and busy workers are terminated when the position changes or the search deadline expires. See [browser gameplay](web-wasm.md#playing-in-the-browser) for the UI behavior and default search limits.
 
 ## Errors and generated declarations
 
