@@ -16,6 +16,8 @@ tested-with:        GHC ==9.10.3
 extra-doc-files:
     README.md
     CHANGELOG.md
+extra-source-files:
+    scripts/*.sh
 
 common shared
     default-language: Haskell2010
@@ -35,6 +37,7 @@ library
         Solitaire.Games.Spider
         Solitaire.Games.Yukon
         Solitaire.Solver
+        Solitaire.Wasm
     build-depends:    containers >=0.6 && <0.9
 
 executable solitaire

@@ -1,0 +1,3 @@
+[submodule "vendor/ghc-wasm-bindgen"]
+	path = vendor/ghc-wasm-bindgen
+	url = https://github.com/joaquin-rossi/ghc-wasm-bindgen.git

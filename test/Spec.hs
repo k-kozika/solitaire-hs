@@ -6,6 +6,7 @@ import qualified Data.Map.Strict as Map
 import Solitaire.Engine
 import Solitaire.Games (freecell, games, golf, grandfathersClock, klondike, spider, yukon)
 import Solitaire.Solver (SearchResult(..), solve)
+import qualified Solitaire.Wasm as Wasm
 import System.Exit (die)
 
 main :: IO ()
@@ -22,7 +23,21 @@ main = do
   winningMoves
   solverLimits
   solveInitialDeal
+  wasmApi
   putStrLn "All solitaire checks passed."
+
+wasmApi :: IO ()
+wasmApi = do
+  check "Wasm game catalog matches the engine" $
+    Wasm.games == [(name, gameName def) | (name, def) <- games]
+  forM_ games $ \(name, def) -> do
+    forM_ [0, 42, 2 ^ (64 :: Int) - 1] $ \seed ->
+      check (name ++ " Wasm preserves the seed") $
+        Wasm.newGame name seed == newGame def (fromInteger seed)
+    check (name ++ " Wasm rejects seed overflow and underflow") $
+      rejected (Wasm.newGame name (-1)) &&
+      rejected (Wasm.newGame name (2 ^ (64 :: Int)))
+  check "Wasm rejects unknown game IDs" $ rejected (Wasm.newGame "unknown-game" 0)
 
 initialDeals :: IO ()
 initialDeals = do
