@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks'
-import type { ComponentChildren, TargetedDragEvent, TargetedSubmitEvent } from 'preact'
+import type { ComponentChildren, TargetedDragEvent, TargetedPointerEvent, TargetedSubmitEvent } from 'preact'
 import { AnalysisClient } from './analysis'
 import { loadEngine } from './engine'
 import {
@@ -102,11 +102,12 @@ function WinDialog({ session, onNew, onDeal, onClose, onUndo }: {
   </Modal>
 }
 
-function BoardPile({ session, pile, selection, hint, dragging, onCard, onDraw, onDrag, onDragEnd, onDrop }: {
+function BoardPile({ session, pile, selection, hint, dragging, onCard, onDraw, onDrag, onDragEnd, onDrop, onPointerDown }: {
   session: Session; pile: Pile; selection: Selection | null; hint: Action | null; dragging: boolean
   onCard: (pile: Pile, count: number) => void; onDraw: () => void
   onDrag: (event: TargetedDragEvent<HTMLButtonElement>, pile: Pile, count: number) => void
   onDragEnd: () => void; onDrop: (event: TargetedDragEvent<HTMLDivElement>, pile: Pile) => void
+  onPointerDown: (event: TargetedPointerEvent<HTMLButtonElement>, pile: Pile, count: number) => void
 }) {
   const entries = entriesFor(session.board, pile)
   const group = pile.contents[0]
@@ -152,6 +153,8 @@ function BoardPile({ session, pile, selection, hint, dragging, onCard, onDraw, o
           style={tableau ? { top: `calc(${position} * var(--card-overlap))` } : undefined}
           disabled={!enabled} draggable={movable} aria-label={label} aria-pressed={!down && movable ? selected : undefined}
           onClick={() => stock ? onDraw() : onCard(pile, count)}
+          onPointerDown={event => onPointerDown(event, pile, count)}
+          onContextMenu={event => { if (movable) event.preventDefault() }}
           onDragStart={event => onDrag(event, pile, count)} onDragEnd={onDragEnd}>
           {down ? <span class="back-pattern" aria-hidden="true"><span>♠</span></span> : <span aria-hidden="true"><Face card={card} /></span>}
           {target && index === 0 && <span class="target-marker" aria-hidden="true">↳</span>}
@@ -162,21 +165,68 @@ function BoardPile({ session, pile, selection, hint, dragging, onCard, onDraw, o
   </div>
 }
 
-function Table({ session, selection, hint, dragging, onCard, onDraw, onDrag, onDragEnd, onDrop }: Omit<Parameters<typeof BoardPile>[0], 'pile'>) {
+function Table({ session, selection, hint, dragging, onCard, onDraw, onDrag, onDragEnd, onDrop, onTouchDrag, onTouchDrop }: Omit<Parameters<typeof BoardPile>[0], 'pile' | 'onPointerDown'> & {
+  onTouchDrag: (pile: Pile, count: number) => void; onTouchDrop: (pile: Pile) => void
+}) {
   const stocks = pilesFor(session.board, 'Stock')
   const waste = pilesFor(session.board, 'Waste')
   const cells = pilesFor(session.board, 'Cell')
   const foundations = pilesFor(session.board, 'Foundation')
   const tableaus = pilesFor(session.board, 'Tableau')
-  const props = { session, selection, hint, dragging, onCard, onDraw, onDrag, onDragEnd, onDrop }
+  const touch = useRef<{
+    pointerId: number; pile: Pile; count: number; x: number; y: number
+    offsetX: number; offsetY: number; active: boolean
+  } | null>(null)
+  const [preview, setPreview] = useState<{ pile: Pile; count: number; x: number; y: number } | null>(null)
+  useEffect(() => { touch.current = null; setPreview(null) }, [session.revision])
+
+  function pointerDown(event: TargetedPointerEvent<HTMLButtonElement>, pile: Pile, count: number) {
+    if (event.pointerType === 'mouse' || !event.isPrimary || event.button !== 0 || !canSelect(session.actions, pile, count)) return
+    const rect = event.currentTarget.getBoundingClientRect()
+    touch.current = { pointerId: event.pointerId, pile, count, x: event.clientX, y: event.clientY,
+      offsetX: event.clientX - rect.left, offsetY: event.clientY - rect.top, active: false }
+    event.currentTarget.setPointerCapture(event.pointerId)
+  }
+
+  function pointerMove(event: TargetedPointerEvent<HTMLDivElement>) {
+    const drag = touch.current
+    if (!drag || drag.pointerId !== event.pointerId) return
+    if (!drag.active && Math.hypot(event.clientX - drag.x, event.clientY - drag.y) < 6) return
+    event.preventDefault()
+    if (!drag.active) { drag.active = true; onTouchDrag(drag.pile, drag.count) }
+    setPreview({ pile: drag.pile, count: drag.count, x: event.clientX - drag.offsetX, y: event.clientY - drag.offsetY })
+  }
+
+  function pointerEnd(event: TargetedPointerEvent<HTMLDivElement>) {
+    const drag = touch.current
+    if (!drag || drag.pointerId !== event.pointerId) return
+    touch.current = null
+    setPreview(null)
+    if (!drag.active) return
+    event.preventDefault()
+    const key = event.type === 'pointerup' ? document.elementFromPoint(event.clientX, event.clientY)?.closest('[data-pile]')?.getAttribute('data-pile') : null
+    const target = [...stocks, ...waste, ...cells, ...foundations, ...tableaus].find(pile => pileKey(pile) === key)
+    if (target) onTouchDrop(target)
+    else onDragEnd()
+  }
+
+  const props = { session, selection, hint, dragging, onCard, onDraw, onDrag, onDragEnd, onDrop, onPointerDown: pointerDown }
   const renderPile = (pile: Pile) => <BoardPile key={pileKey(pile)} {...props} pile={pile} />
-  return <div class="board-scroll" tabIndex={0} role="region" aria-label="Card table. Scroll horizontally to see all columns.">
-    <div class={`board-layout ${session.gameId === 'grandfathers-clock' ? 'clock-layout' : ''}`} style={{ '--columns': tableaus.length }}>
+  const reserveColumns = stocks.length + waste.length + cells.length + (foundations.length === 12 ? 6 : foundations.length)
+  return <div class="board-scroll" tabIndex={0} role="region" aria-label="Card table"
+    onPointerMove={pointerMove} onPointerUp={pointerEnd} onPointerCancel={pointerEnd} onLostPointerCapture={pointerEnd}>
+    <div class={`board-layout ${session.gameId === 'grandfathers-clock' ? 'clock-layout' : ''}`}
+      style={{ '--columns': tableaus.length, '--layout-columns': Math.max(tableaus.length, reserveColumns) }}>
       <div class="reserve-row">
         <div class="reserve-piles">{[...stocks, ...waste, ...cells].map(renderPile)}</div>
         {foundations.length > 0 && <div class={`foundation-piles ${foundations.length === 12 ? 'clock-foundations' : ''}`} aria-label="Foundations">{foundations.map(renderPile)}</div>}
       </div>
       <div class="tableau-row">{tableaus.map(renderPile)}</div>
+      {preview && <div class="touch-drag-preview" aria-hidden="true" style={{ left: `${preview.x}px`, top: `${preview.y}px` }}>
+        {entriesFor(session.board, preview.pile).slice(0, preview.count).reverse().map((entry, index) => <div
+          class={`card ${entry.contents[1].suit === 'Hearts' || entry.contents[1].suit === 'Diamonds' ? 'card-red' : ''}`}
+          style={{ top: `calc(${index} * var(--card-overlap))` }}><Face card={entry.contents[1]} /></div>)}
+      </div>}
     </div>
   </div>
 }
@@ -285,10 +335,15 @@ export function App() {
 
   function beginDrag(event: TargetedDragEvent<HTMLButtonElement>, pile: Pile, count: number) {
     if (!session || !canSelect(session.actions, pile, count) || !event.dataTransfer || dialog) { event.preventDefault(); return }
-    const next = { pile, count }
-    dragRef.current = { selection: next, revision: session.revision }
+    activateDrag(pile, count)
     event.dataTransfer.effectAllowed = 'move'
     event.dataTransfer.setData('text/plain', 'solitaire-card')
+  }
+
+  function activateDrag(pile: Pile, count: number) {
+    if (!session || dialog) return
+    const next = { pile, count }
+    dragRef.current = { selection: next, revision: session.revision }
     setSelection(next)
     setHint(null)
     setDragging(true)
@@ -303,10 +358,15 @@ export function App() {
   }
 
   function drop(event: TargetedDragEvent<HTMLDivElement>, pile: Pile) {
+    event.preventDefault()
+    dropOn(pile)
+  }
+
+  function dropOn(pile: Pile) {
     const drag = dragRef.current
     if (!drag || !session || drag.revision !== session.revision) return
     const action = moveTo(session.actions, drag.selection, pile)
-    if (action) { event.preventDefault(); play(action) }
+    if (action) play(action)
     endDrag()
   }
 
@@ -338,7 +398,7 @@ export function App() {
       </div>
       {session ? <Table session={session} selection={selection} hint={hint} dragging={dragging} onCard={choose}
         onDraw={() => { const draw = session.actions.find(action => action.$tag === 'Draw'); if (draw) play(draw) }}
-        onDrag={beginDrag} onDragEnd={endDrag} onDrop={drop} />
+        onDrag={beginDrag} onDragEnd={endDrag} onDrop={drop} onTouchDrag={activateDrag} onTouchDrop={dropOn} />
         : <div class="waiting-table">
           {!engine && !loadError && <span class="loading-line" role="status">Loading the game engine</span>}
           {loadError && <div class="load-error" role="alert"><p>The game engine could not load. Reload to try again.</p><details><summary>Details</summary>{loadError}</details><button class="button button-table" type="button" onClick={() => location.reload()}>Reload</button></div>}
