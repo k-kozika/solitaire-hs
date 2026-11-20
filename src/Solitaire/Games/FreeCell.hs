@@ -7,20 +7,21 @@ freecell = Definition
   { gameName = "FreeCell"
   , deckSuits = [minBound .. maxBound]
   , layout = [(Cell, 4), (Foundation, 4), (Tableau, 8)]
+  , fixedCards = []
   , initialDeal = [(Pile Tableau column, Up) | column <- take 52 (cycle [1 .. 8])]
   , reservePile = Nothing
   , transfers =
-      [ Transfer Tableau Tableau (ByVacancies alternating Cell Tableau) loose
-      , Transfer Tableau Cell Single EmptyOnly
-      , Transfer Cell Tableau Single loose
-      , Transfer Tableau Foundation Single suitFoundation
-      , Transfer Cell Foundation Single suitFoundation
+      [ Transfer (GroupPiles Tableau) (GroupPiles Tableau) (ByVacancies alternating Cell Tableau) loose
+      , Transfer (GroupPiles Tableau) (GroupPiles Cell) Single EmptyOnly
+      , Transfer (GroupPiles Cell) (GroupPiles Tableau) Single loose
+      , Transfer (GroupPiles Tableau) (GroupPiles Foundation) Single suitFoundation
+      , Transfer (GroupPiles Cell) (GroupPiles Foundation) Single suitFoundation
       ]
   , stockRule = NoStock
   , automatic = []
-  , goalGroup = Foundation
+  , goal = CollectAll Foundation
   }
   where
     loose = Build alternating Nothing
-    alternating = Descending AlternatingColors
-    suitFoundation = Build (Ascending SameSuit) (Just Ace)
+    alternating = Descending AlternatingColors Linear
+    suitFoundation = Build (Ascending SameSuit Linear) (Just Ace)

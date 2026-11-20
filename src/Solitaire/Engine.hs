@@ -1,8 +1,8 @@
 module Solitaire.Engine
   ( Suit(..), Rank(..), Card(..), Entry(..), Face(..)
   , Group(..), Pile(..), Board
-  , Relation(..), Sequence(..), Placement(..), MoveLimit(..), Transfer(..)
-  , StockRule(..), Automatic(..), Definition(..), Action(..)
+  , Relation(..), RankOrder(..), Sequence(..), Placement(..), MoveLimit(..)
+  , PileSelector(..), Transfer(..), StockRule(..), Automatic(..), Goal(..), Definition(..), Action(..)
   , newGame, applyAction, legalActions, legalTransitions, won, goalProgress, pileCards, pilesIn
   ) where
 
@@ -33,13 +33,15 @@ data Pile = Pile Group Int deriving (Eq, Ord, Show)
 type Board = Map.Map Pile [Entry]
 
 data Relation = AnySuit | SameSuit | AlternatingColors deriving (Eq, Show)
-data Sequence = Descending Relation | Ascending Relation deriving (Eq, Show)
-data Placement = EmptyOnly | Build Sequence (Maybe Rank) deriving (Eq, Show)
+data RankOrder = Linear | Cyclic deriving (Eq, Show)
+data Sequence = Descending Relation RankOrder | Ascending Relation RankOrder deriving (Eq, Show)
+data Placement = EmptyOnly | Build Sequence (Maybe Rank) | StopAt Rank Placement deriving (Eq, Show)
 
-data MoveLimit = Single | Run Sequence | ByVacancies Sequence Group Group
+data MoveLimit = Single | AnyFaceUp | Run Sequence | ByVacancies Sequence Group Group
   deriving (Eq, Show)
 
-data Transfer = Transfer Group Group MoveLimit Placement deriving (Eq, Show)
+data PileSelector = GroupPiles Group | ExactPile Pile deriving (Eq, Show)
+data Transfer = Transfer PileSelector PileSelector MoveLimit Placement deriving (Eq, Show)
 
 data StockRule
   = NoStock
@@ -52,16 +54,19 @@ data Automatic
   | CollectRun Group Group Sequence Int Bool
   deriving (Eq, Show)
 
+data Goal = CollectAll Group | Clear Group deriving (Eq, Show)
+
 data Definition = Definition
   { gameName :: String
   , deckSuits :: [Suit]
   , layout :: [(Group, Int)]
+  , fixedCards :: [(Pile, Entry)]
   , initialDeal :: [(Pile, Face)]
   , reservePile :: Maybe Pile
   , transfers :: [Transfer]
   , stockRule :: StockRule
   , automatic :: [Automatic]
-  , goalGroup :: Group
+  , goal :: Goal
   } deriving (Eq, Show)
 
 data Action = Move Int Pile Pile | Draw deriving (Eq, Show)
@@ -73,11 +78,12 @@ newGame :: Definition -> Word64 -> Either String Board
 newGame def seed = do
   let board = Map.fromList
         [(Pile group number, []) | (group, count) <- layout def, number <- [1 .. count]]
-      (dealt, remaining) = splitAt (length (initialDeal def)) (shuffle seed (deck def))
       present group = not (null (pilesIn group board))
       exists pile = Map.member pile board
+      validSelector (GroupPiles group) = present group
+      validSelector (ExactPile pile) = exists pile
       validTransfer (Transfer from to limit _) =
-        present from && present to && case limit of
+        all validSelector [from, to] && case limit of
           ByVacancies _ cells columns -> cells /= columns && all present [cells, columns]
           _ -> True
       validAutomatic (RevealTop group) = present group
@@ -87,14 +93,19 @@ newGame def seed = do
         NoStock -> True
         DrawTo stock waste count _ -> stock /= waste && count > 0 && all exists [stock, waste]
         DealAcross stock group _ -> exists stock && present group && pileGroup stock /= group
+      validGoal = case goal def of
+        CollectAll group -> present group
+        Clear group -> present group
   unless (not (null (deckSuits def))) (Left "The deck is empty.")
   unless (all ((> 0) . snd) (layout def) && Map.size board == sum (map snd (layout def)))
     (Left "Each pile group needs one positive count.")
-  unless (present (goalGroup def)) (Left "The goal group is missing.")
+  unless validGoal (Left "The goal group is missing.")
   unless (all validTransfer (transfers def) && all validAutomatic (automatic def) && validStock)
     (Left "A rule has an invalid pile, group, or card count.")
+  (fixed, rest) <- foldM placeFixed (board, deck def) (fixedCards def)
+  let (dealt, remaining) = splitAt (length (initialDeal def)) (shuffle seed rest)
   unless (length dealt == length (initialDeal def)) (Left "The initial deal exceeds the deck.")
-  initialized <- foldM dealOne board (zip (initialDeal def) dealt)
+  initialized <- foldM dealOne fixed (zip (initialDeal def) dealt)
   settle (automatic def) <$> case reservePile def of
     Just reserve -> do
       unless (Map.member reserve board) (Left "The reserve pile is missing.")
@@ -103,6 +114,11 @@ newGame def seed = do
       unless (null remaining) (Left "The definition leaves cards without a pile.")
       pure initialized
   where
+    placeFixed (board, remaining) (pile, entry@(Entry _ card)) = do
+      unless (Map.member pile board) (Left "A fixed card refers to a missing pile.")
+      case break (== card) remaining of
+        (before, _ : after) -> Right (push pile [entry] board, before ++ after)
+        _ -> Left "A fixed card is unavailable in the deck."
     dealOne board ((pile, face), card) = do
       unless (Map.member pile board) (Left "The initial deal refers to a missing pile.")
       pure (push pile [Entry face card] board)
@@ -128,6 +144,10 @@ pilesIn group = filter ((== group) . pileGroup) . Map.keys
 pileGroup :: Pile -> Group
 pileGroup (Pile group _) = group
 
+matches :: PileSelector -> Pile -> Bool
+matches (GroupPiles group) pile = pileGroup pile == group
+matches (ExactPile expected) pile = pile == expected
+
 push :: Pile -> [Entry] -> Board -> Board
 push pile entries = Map.adjust (entries ++) pile
 
@@ -145,7 +165,7 @@ applyMove rules board count source target = do
   let stack = reverse cards
       matching = [ (limit, placement)
                  | Transfer from to limit placement <- rules
-                 , from == pileGroup source, to == pileGroup target ]
+                 , matches from source, matches to target ]
       movable = filter (\(limit, _) -> fitsLimit limit board source target stack) matching
   unless (not (null matching)) (Left "This route is unavailable.")
   unless (not (null movable)) (Left "This stack cannot be moved together.")
@@ -162,6 +182,7 @@ applyMove rules board count source target = do
 
 fitsLimit :: MoveLimit -> Board -> Pile -> Pile -> [Card] -> Bool
 fitsLimit Single _ _ _ cards = length cards == 1
+fitsLimit AnyFaceUp _ _ _ _ = True
 fitsLimit (Run order) _ _ _ cards = ordered order cards
 fitsLimit (ByVacancies order cells columns) board source target cards =
   ordered order cards && toInteger (length cards) <= capacity
@@ -172,6 +193,9 @@ fitsLimit (ByVacancies order cells columns) board source target cards =
 
 fits :: Placement -> Card -> [Entry] -> Bool
 fits EmptyOnly _ entries = null entries
+fits (StopAt terminal placement) card entries = case entries of
+  Entry _ top : _ | rank top == terminal -> False
+  _ -> fits placement card entries
 fits (Build _ required) card [] = maybe True (== rank card) required
 fits (Build order _) card (Entry Up previous : _) = follows order previous card
 fits (Build _ _) _ (Entry Down _ : _) = False
@@ -181,10 +205,13 @@ ordered order cards = and (zipWith (follows order) cards (drop 1 cards))
 
 follows :: Sequence -> Card -> Card -> Bool
 follows order previous next = case order of
-  Descending relation -> difference == -1 && suitsMatch relation
-  Ascending relation -> difference == 1 && suitsMatch relation
+  Descending relation rankOrder -> adjacent rankOrder (-1) && suitsMatch relation
+  Ascending relation rankOrder -> adjacent rankOrder 1 && suitsMatch relation
   where
     difference = fromEnum (rank next) - fromEnum (rank previous)
+    adjacent Linear step = difference == step
+    adjacent Cyclic step = difference `mod` rankCount == step `mod` rankCount
+    rankCount = fromEnum (maxBound :: Rank) - fromEnum (minBound :: Rank) + 1
     suitsMatch AnySuit = True
     suitsMatch SameSuit = suit previous == suit next
     suitsMatch AlternatingColors = red (suit previous) /= red (suit next)
@@ -254,13 +281,21 @@ legalTransitions def board =
             , let visibleCount = length (takeWhile exposed entries)
             , visibleCount > 0
             , target <- Map.keys board
-            , source /= target, (pileGroup source, pileGroup target) `elem` routes
+            , source /= target
+            , any (\(from, to) -> matches from source && matches to target) routes
             , count <- [1 .. visibleCount] ]
     exposed (Entry face _) = face == Up
 
 won :: Definition -> Board -> Bool
-won def board = goalProgress def board == length (deck def)
+won def board = case goal def of
+  CollectAll group -> groupSize group board == length (deck def)
+  Clear group -> groupSize group board == 0
 
+-- Higher is better; drawing from stock does not advance a Clear goal.
 goalProgress :: Definition -> Board -> Int
-goalProgress def board =
-  sum (map (length . pileCards board) (pilesIn (goalGroup def) board))
+goalProgress def board = case goal def of
+  CollectAll group -> groupSize group board
+  Clear group -> length (deck def) - groupSize group board
+
+groupSize :: Group -> Board -> Int
+groupSize group board = sum (map (length . pileCards board) (pilesIn group board))
