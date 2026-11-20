@@ -8,7 +8,8 @@ module Solitaire.Engine
 
 import Control.Monad (foldM, unless)
 import Data.Bits (shiftR, xor)
-import Data.List (find, foldl')
+import Data.List (find)
+import qualified Data.List as List (foldl')
 import qualified Data.Map.Strict as Map
 import Data.Word (Word64)
 
@@ -236,7 +237,7 @@ applyStock (DealAcross stock group requireFilled) board = do
   unless (not requireFilled || all (not . null . pileCards board) targets)
     (Left "Fill every column before dealing from stock.")
   unless (length picked == length targets) (Left "There are no full rows left to deal.")
-  pure (foldl' dealOne (Map.insert stock rest board) (zip targets picked))
+  pure (List.foldl' dealOne (Map.insert stock rest board) (zip targets picked))
   where
     targets = pilesIn group board
     (picked, rest) = splitAt (length targets) (pileCards board stock)
@@ -247,12 +248,12 @@ faceAs face (Entry _ card) = Entry face card
 
 -- Each collection fills an empty pile, so one pass per rule terminates.
 settle :: [Automatic] -> Board -> Board
-settle rules board = foldl' (flip perform) board rules
+settle rules board = List.foldl' (flip perform) board rules
   where
     perform (RevealTop group) current =
-      foldl' (flip (Map.adjust reveal)) current (pilesIn group current)
+      List.foldl' (flip (Map.adjust reveal)) current (pilesIn group current)
     perform (CollectRun source target order count expose) current =
-      foldl' collect current (pilesIn source current)
+      List.foldl' collect current (pilesIn source current)
       where
         collect state pile =
           case (splitAt count (pileCards state pile), find (null . pileCards state) (pilesIn target state)) of

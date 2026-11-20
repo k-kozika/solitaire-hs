@@ -1,6 +1,6 @@
 module Solitaire.Solver (SearchResult(..), solve) where
 
-import Data.List (foldl')
+import qualified Data.List as List (foldl')
 import qualified Data.Map.Strict as Map
 import qualified Data.Ord as Ord
 import qualified Data.Set as Set
@@ -25,7 +25,7 @@ solve budget def initial =
         | remaining == 0 -> LimitReached
         | otherwise ->
             let (nextTicket, visited, ready) =
-                  foldl' (enqueue (depth + 1) path) (ticket, seen, queue) (legalTransitions def board)
+                  List.foldl' (enqueue (depth + 1) path) (ticket, seen, queue) (legalTransitions def board)
             in search (remaining - 1) nextTicket visited ready
 
     enqueue depth path state@(ticket, seen, queue) (action, next)

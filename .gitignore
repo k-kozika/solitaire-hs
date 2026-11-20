@@ -1,0 +1,10 @@
+/build/
+/dist/
+/dist-newstyle/
+/cabal.project.local
+/cabal.project.local~
+/cabal.project.freeze
+*.hi
+*.o
+*.dyn_hi
+*.dyn_o

@@ -326,10 +326,10 @@ clockBases =
 winningMoves :: IO ()
 winningMoves = do
   forM_ [klondike, freecell, yukon] $ \def -> do
-    let goal n s r = (foundation n, [up value s | value <- reverse [Ace .. r]])
+    let foundationCards n s r = (foundation n, [up value s | value <- reverse [Ace .. r]])
         board = Map.fromList
-          [(tableau 1, [up King Spades]), goal 1 Clubs King, goal 2 Diamonds King,
-           goal 3 Hearts King, goal 4 Spades Queen]
+          [(tableau 1, [up King Spades]), foundationCards 1 Clubs King, foundationCards 2 Diamonds King,
+           foundationCards 3 Hearts King, foundationCards 4 Spades Queen]
     end <- succeed (applyAction def board (Move 1 (tableau 1) (foundation 4)))
     check (gameName def ++ " recognizes the last foundation move") (not (won def board) && won def end)
     let beforeQueen = Map.insert (tableau 1) [up Queen Spades, up King Spades]
