@@ -7,11 +7,13 @@
     "wasm": "bash ../scripts/build-wasm.sh",
     "dev": "bun run wasm && vite",
     "build": "bun run wasm && tsc -b && vite build",
-    "test": "bun test ./test/game.test.ts ./test/analysis.test.ts",
+    "test": "bun test ./test/game.test.ts ./test/analysis.test.ts ./test/card-motion.test.ts ./test/board-layout.test.ts",
     "test:wasm": "node --test ./test/wasm.test.mjs",
     "preview": "vite preview"
   },
   "dependencies": {
+    "@dnd-kit/dom": "^0.5.3",
+    "lucide-preact": "^1.77.0",
     "preact": "^11.1.1"
   },
   "devDependencies": {

@@ -1,0 +1,66 @@
+.new-game-modal form {
+  margin-top: 28px;
+}
+.new-game-modal label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 9px;
+}
+.new-game-modal input,
+.new-game-modal select {
+  width: 100%;
+  height: 48px;
+  color: #2e4535;
+  background: #fffef9;
+  border: 1px solid #d7dacd;
+  border-radius: 6px;
+  padding: 0 13px;
+  font-size: 16px;
+}
+.new-game-modal input::placeholder {
+  color: #8c9285;
+  font-size: 12px;
+}
+.new-game-modal input[aria-invalid="true"] {
+  border-color: #b53342;
+}
+.select-wrap {
+  position: relative;
+}
+.select-wrap select {
+  appearance: none;
+  padding-right: 40px;
+}
+.select-wrap > svg {
+  pointer-events: none;
+  position: absolute;
+  top: 17px;
+  right: 18px;
+  color: #5c7059;
+}
+.seed-label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 16px;
+}
+.optional {
+  color: #8d9585;
+  font-size: 10px;
+  font-weight: 400;
+  margin-left: 6px;
+}
+.form-error {
+  color: #a22c37;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.form-error:not(:empty) {
+  margin-top: 10px;
+}
+@media (max-width: 700px) {
+  .new-game-modal form {
+    margin-top: 23px;
+  }
+}

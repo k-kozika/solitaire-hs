@@ -1,0 +1,47 @@
+.tableau-stack .card-corner:not(.card-corner-bottom),
+.card-flight-tableau .card-corner:not(.card-corner-bottom),
+.drag-preview .card-corner:not(.card-corner-bottom) {
+  flex-direction: row;
+  align-items: baseline;
+  gap: min(4px, calc(var(--card-width) * 0.04));
+}
+.tableau-stack .card-corner:not(.card-corner-bottom),
+.card-flight-tableau .card-corner:not(.card-corner-bottom),
+.drag-preview .card-corner:not(.card-corner-bottom) {
+  top: calc(var(--card-width) * 0.04);
+  font-size: min(18px, calc(var(--card-width) * 0.22));
+}
+.card-corner {
+  position: absolute;
+  left: min(7px, calc(var(--card-width) * 0.08));
+  top: min(5px, calc(var(--card-width) * 0.06));
+  display: flex;
+  align-items: center;
+  flex-direction: column;
+  font:
+    bold min(21px, calc(var(--card-width) * 0.26))/0.95 Georgia,
+    "Times New Roman",
+    serif;
+  letter-spacing: calc(var(--card-width) * -0.006);
+  gap: calc(var(--card-width) * 0.024);
+}
+.card-corner > span + span {
+  font-size: min(17px, calc(var(--card-width) * 0.21));
+  line-height: 0.9;
+}
+.card-corner-bottom {
+  left: auto;
+  top: auto;
+  right: min(7px, calc(var(--card-width) * 0.08));
+  bottom: min(5px, calc(var(--card-width) * 0.06));
+  transform: rotate(180deg);
+}
+.card-suit {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font:
+    min(42px, calc(var(--card-width) * 0.5))/1 Georgia,
+    serif;
+}

@@ -1,0 +1,75 @@
+.result-stats > div > span,
+.result-seed {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 1.7px;
+}
+.win-modal {
+  padding-bottom: 26px;
+}
+.win-symbol {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 74px;
+  color: #345740;
+  margin-bottom: 18px;
+}
+.win-modal h2 {
+  font-size: 46px;
+}
+.result-game {
+  font:
+    22px Georgia,
+    serif;
+  text-align: center;
+  margin: 27px 0 20px;
+}
+.result-stats {
+  display: flex;
+  justify-content: center;
+  gap: 46px;
+  padding-bottom: 22px;
+  border-bottom: 1px solid #e1e5d7;
+}
+.result-stats > div {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+}
+.result-stats > div > span {
+  font-size: 9px;
+  color: #7e8975;
+}
+.result-stats strong {
+  font:
+    normal 28px Georgia,
+    serif;
+  font-variant-numeric: tabular-nums;
+}
+.result-seed {
+  text-align: center;
+  color: #7e8975;
+  font-size: 8px;
+  letter-spacing: 1px;
+  margin-top: 19px;
+  overflow-wrap: anywhere;
+}
+.result-seed > span {
+  display: block;
+  color: #455f42;
+  margin-top: 8px;
+  font-size: 12px;
+  letter-spacing: 0.5px;
+}
+@media (max-width: 700px) {
+  .win-modal {
+    padding-bottom: 22px;
+  }
+  .win-modal h2 {
+    font-size: 29px;
+  }
+}

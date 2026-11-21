@@ -1,9 +1,9 @@
-import preact from '@preact/preset-vite'
-import { defineConfig } from 'vite'
+import preact from "@preact/preset-vite";
+import { defineConfig } from "vite";
 
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [preact()],
-  build: { target: 'es2022' },
-  worker: { format: 'es' },
-})
+  build: { target: "es2022" },
+  worker: { format: "es" },
+});
