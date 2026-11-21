@@ -7,8 +7,7 @@
     "wasm": "bash ../scripts/build-wasm.sh",
     "dev": "bun run wasm && vite",
     "build": "bun run wasm && tsc -b && vite build",
-    "test": "bun test ./test/game.test.ts ./test/analysis.test.ts ./test/card-motion.test.ts ./test/board-layout.test.ts",
-    "test:wasm": "node --test ./test/wasm.test.mjs",
+    "test": "bun test ./test/game.test.ts ./test/analysis.test.ts ./test/card-motion.test.ts ./test/board-layout.test.ts ./test/wasm.test.ts",
     "preview": "vite preview"
   },
   "dependencies": {
