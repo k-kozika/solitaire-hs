@@ -1,0 +1,96 @@
+name: Web Test and Build
+
+on:
+  workflow_call:
+    inputs:
+      upload-pages-artifact:
+        description: Upload the tested build for GitHub Pages
+        type: boolean
+        default: false
+  workflow_dispatch:
+  # main is tested by pages.yml before deployment.
+  push:
+    branches-ignore: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  GHC_WASM_META_REV: 8079eb96bbc63823d99ad8acaff0765532625474
+  FLAVOUR: '9.14'
+  NATIVE_GHC: ghc
+  WASM_GHC: wasm32-wasi-ghc
+  WASM_GHC_PKG: wasm32-wasi-ghc-pkg
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+        env:
+          GIT_LFS_SKIP_SMUDGE: '1'
+
+      - uses: haskell-actions/setup@v2
+        id: haskell
+        with:
+          ghc-version: '9.10.3'
+          cabal-update: false
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.5'
+
+      - name: Cache GHC Wasm toolchain
+        id: wasm-cache
+        uses: actions/cache@v6
+        with:
+          path: ~/.ghc-wasm
+          key: ${{ runner.os }}-${{ runner.arch }}-ghc-wasm-${{ env.FLAVOUR }}-${{ env.GHC_WASM_META_REV }}
+
+      - name: Install GHC Wasm toolchain
+        if: steps.wasm-cache.outputs.cache-hit != 'true'
+        run: |
+          toolchain_source=$(mktemp -d)
+          curl -fsSL --retry 5 \
+            "https://github.com/haskell-wasm/ghc-wasm-meta/archive/${GHC_WASM_META_REV}.tar.gz" \
+            -o "$RUNNER_TEMP/ghc-wasm-meta.tar.gz"
+          tar -xzf "$RUNNER_TEMP/ghc-wasm-meta.tar.gz" --strip-components=1 -C "$toolchain_source"
+          bash "$toolchain_source/setup.sh"
+
+      - name: Add Wasm compiler to PATH
+        # Keep the native C toolchain for bindgen; do not source the cross-compilation env file.
+        run: echo "$HOME/.ghc-wasm/wasm32-wasi-ghc/bin" >> "$GITHUB_PATH"
+
+      - name: Cache Cabal dependencies
+        uses: actions/cache@v6
+        with:
+          path: ${{ steps.haskell.outputs.cabal-store }}
+          key: ${{ runner.os }}-${{ runner.arch }}-web-${{ env.GHC_WASM_META_REV }}-${{ hashFiles('**/*.cabal', '**/cabal.project') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-web-${{ env.GHC_WASM_META_REV }}-
+
+      - run: cabal update
+
+      - name: Install frontend dependencies
+        working-directory: web
+        run: bun install --frozen-lockfile
+
+      - name: Build Wasm and frontend for GitHub Pages
+        working-directory: web
+        run: bun run build --base "/${GITHUB_REPOSITORY#*/}/"
+
+      - name: Test frontend and Wasm
+        working-directory: web
+        run: bun run test
+
+      - name: Upload GitHub Pages artifact
+        if: inputs.upload-pages-artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: web/dist

@@ -1,0 +1,40 @@
+name: GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  haskell-test:
+    uses: ./.github/workflows/test.yml
+
+  web-test-and-build:
+    uses: ./.github/workflows/web.yml
+    with:
+      upload-pages-artifact: true
+
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    needs: [haskell-test, web-test-and-build]
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v6
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5

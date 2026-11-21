@@ -1,0 +1,38 @@
+name: Haskell Test
+
+on:
+  workflow_call:
+  workflow_dispatch:
+  # main is tested by pages.yml before deployment.
+  push:
+    branches-ignore: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: haskell-actions/setup@v2
+        id: haskell
+        with:
+          ghc-version: '9.10.3'
+          cabal-update: false
+
+      - name: Cache Cabal dependencies
+        uses: actions/cache@v6
+        with:
+          path: ${{ steps.haskell.outputs.cabal-store }}
+          key: ${{ runner.os }}-${{ runner.arch }}-native-${{ hashFiles('solitire-hs.cabal', 'cabal.project') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-native-
+
+      - name: Build and test
+        run: |
+          cabal update
+          cabal build all
+          cabal test all --test-show-details=direct

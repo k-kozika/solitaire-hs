@@ -128,17 +128,28 @@ bun run preview
 
 Generated binding files are ignored by Git. Edit [Solitaire.Wasm](../src/Solitaire/Wasm.hs) or the underlying engine and regenerate them. See [the API guide](wasm-api.md) for import paths and data representations.
 
+## GitHub Actions and Pages
+
+Three workflows handle validation and deployment:
+
+- [Haskell Test](../.github/workflows/test.yml) builds the native executables and runs `cabal test all`, using GHC 9.10.3 and Cabal 3.16.1.0. It does not install Wasm tools.
+- [Web Test and Build](../.github/workflows/web.yml) installs Bun 1.4.5 and a pinned `ghc-wasm-meta` toolchain with Wasm GHC 9.14. It uses the same native GHC and Cabal versions to generate Wasm, type-check and bundle the frontend, and run the frontend and Wasm tests. The production asset base is the repository's Pages path.
+- [GitHub Pages](../.github/workflows/pages.yml) calls both workflows on pushes to `main` and deploys the tested `web/dist` artifact only after both succeed. Manual runs deploy only when the selected branch is `main`.
+
+Pull requests and pushes to other branches run the two validation workflows directly. Native dependencies, Web build dependencies, and the Wasm toolchain have separate caches.
+
+In the repository's **Settings → Pages → Build and deployment**, set **Source** to **GitHub Actions** before the first deployment.
+
 ## Frontend checks
 
 From `web/`:
 
 ```sh
-bun run test
-bun run test:wasm
 bun run build
+bun run test
 ```
 
-The first command checks seed parsing, legal selections, session accounting, and worker cancellation and stale-result handling. `test:wasm` requires generated bindings and Node.js 22.18 or later (for built-in TypeScript type stripping). It exercises all games through the actual Wasm facade and replays the winning path for Klondike seed 7. `build` regenerates Wasm, checks TypeScript, and bundles the application and module worker.
+`build` regenerates Wasm, checks TypeScript, and bundles the application and module worker. `test` checks seed parsing, legal selections, session accounting, worker cancellation and stale-result handling, card motion, and board layout. It also exercises all games through the generated Wasm facade and replays the winning path for Klondike seed 7, so run the build before testing.
 
 ## Troubleshooting
 
