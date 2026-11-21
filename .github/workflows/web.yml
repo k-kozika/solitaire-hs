@@ -40,6 +40,7 @@ jobs:
         id: haskell
         with:
           ghc-version: '9.10.3'
+          cabal-version: '3.16.1.0'
           cabal-update: false
 
       - uses: oven-sh/setup-bun@v2
@@ -91,6 +92,6 @@ jobs:
 
       - name: Upload GitHub Pages artifact
         if: inputs.upload-pages-artifact
-        uses: actions/upload-pages-artifact@v4
+        uses: actions/upload-pages-artifact@v5
         with:
           path: web/dist
