@@ -27,7 +27,7 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ${{ steps.haskell.outputs.cabal-store }}
-          key: ${{ runner.os }}-${{ runner.arch }}-native-${{ hashFiles('solitire-hs.cabal', 'cabal.project') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-native-${{ hashFiles('solitaire-hs.cabal', 'cabal.project') }}
           restore-keys: |
             ${{ runner.os }}-${{ runner.arch }}-native-
 

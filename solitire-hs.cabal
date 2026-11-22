@@ -1,5 +1,5 @@
 cabal-version:      3.0
-name:               solitire-hs
+name:               solitaire-hs
 version:            0.1.0.0
 synopsis:           Solitaire engine, terminal games, and solver
 description:
@@ -46,19 +46,19 @@ executable solitaire
     import:           shared
     hs-source-dirs:   app
     main-is:          Main.hs
-    build-depends:    solitire-hs
+    build-depends:    solitaire-hs
 
 executable solitaire-solve
     import:           shared
     hs-source-dirs:   app
     main-is:          Solve.hs
-    build-depends:    solitire-hs
+    build-depends:    solitaire-hs
 
-test-suite solitire-hs-test
+test-suite solitaire-hs-test
     import:           shared
     type:             exitcode-stdio-1.0
     hs-source-dirs:   test
     main-is:          Spec.hs
     build-depends:
         containers >=0.6 && <0.9,
-        solitire-hs
+        solitaire-hs

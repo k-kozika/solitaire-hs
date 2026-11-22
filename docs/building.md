@@ -8,7 +8,7 @@ The native library, terminal interface, solver, and tests use GHC and Cabal. The
 
 The library depends on `base` and `containers`; the executables depend on the library. Native builds do not require the Wasm compiler, JavaScript tooling, or the bindgen submodule.
 
-The Cabal package name is `solitire-hs`, including that spelling. The executable names are `solitaire` and `solitaire-solve`.
+The Cabal package name is `solitaire-hs`, including that spelling. The executable names are `solitaire` and `solitaire-solve`.
 
 ## Build
 
@@ -47,7 +47,7 @@ The Wasm facade checks run as native Haskell tests. They do not instantiate the 
 ## Interactive development
 
 ```sh
-cabal repl lib:solitire-hs
+cabal repl lib:solitaire-hs
 ```
 
 For example, in GHCi:

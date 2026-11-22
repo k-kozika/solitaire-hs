@@ -9,7 +9,7 @@ Several solitaire games, including Klondike, have already been defined. See the 
 
 ## Running
 
-This project uses GHC and Cabal. You can interactively explore the engine and game definitions by running `cabal repl lib:solitire-hs`.
+This project uses GHC and Cabal. You can interactively explore the engine and game definitions by running `cabal repl lib:solitaire-hs`.
 
 Tested with GHC 9.10.3.
 

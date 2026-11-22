@@ -34,7 +34,7 @@ import Solitaire.Games.Klondike3 (klondike3)
 
 Choose a unique lowercase ID. The terminal executable, solver executable, and Wasm facade all use this catalog. The terminal interfaces lowercase the input; the Wasm facade expects the exact registered ID.
 
-Add the module to the library's `exposed-modules` in [solitire-hs.cabal](../solitire-hs.cabal) if callers should import it directly. If it is an internal module, list it under `other-modules` instead. Re-export the value from `Solitaire.Games` if it should be available through that convenience module.
+Add the module to the library's `exposed-modules` in [solitaire-hs.cabal](../solitaire-hs.cabal) if callers should import it directly. If it is an internal module, list it under `other-modules` instead. Re-export the value from `Solitaire.Games` if it should be available through that convenience module.
 
 After registration:
 

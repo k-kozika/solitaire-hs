@@ -1,4 +1,4 @@
-# Revision history for solitire-hs
+# Revision history for solitaire-hs
 
 ## 0.1.0.0 -- Unreleased
 
