@@ -10,11 +10,11 @@ Select a card or a face-up group, then select a marked destination. Desktop user
 
 The timer measures elapsed time from dealing until victory, including time in other tabs or the new-game dialog. Each successful move or stock action counts as one move. Automatic reveals and collections do not add moves.
 
-**Undo** (Ctrl+Z / Cmd+Z) restores the position before the last move or stock action, including automatic reveals, collected runs, and stock recycling. Undo is repeatable back to the initial deal and reduces the move count; elapsed time is not rewound. The restored position is analyzed again and its old hint is cleared. Undoing the last move of a won game resumes play and the timer. A new deal clears the undo history. Shortcuts leave text editing in the settings dialog alone.
+**Undo** (Ctrl+Z / Cmd+Z) restores the position before the last move or stock action, including automatic reveals, collected runs, and stock recycling. Undo is repeatable back to the initial deal and reduces the move count; elapsed time is not rewound. Analysis resumes from the retained search for the restored position and its old hint is cleared. Undoing the last move of a won game resumes play and the timer. A new deal clears the undo history. Shortcuts leave text editing in the settings dialog alone.
 
-The background solver runs in a separate Web Worker after each board change. Its states are **Analyzing**, **Winning path found**, **No winning path**, and **Unable to determine**. Only an exhaustive search establishes that there is no winning path. The default limits are 3,500 expanded boards and five seconds of search time, configured in `web/src/analysis.ts`. Worker initialization has a separate 15-second deadline. A budget or time limit leaves the position undetermined; a worker error leaves gameplay available.
+The background solver runs in a separate Web Worker after each board change. Its states are **Analyzing**, **Winning path found**, **No winning path**, and **Unable to determine**. Only an exhaustive search establishes that there is no winning path. Search continues automatically in small slices: initially 32 expansions, then 1–128 expansions adjusted toward 10 ms per slice. Each slice yields to the worker event loop with `setTimeout`. Only the displayed board is searched. Sessions retain up to 8 starting boards and 100,000 entries by default, using the common Haskell `SolverLimits`. A retention stop displays “Retention limit reached; the result is undetermined.” Worker initialization has a 15-second deadline; during search, progress resets a five-second silence watchdog. Only an unresponsive or failed worker is terminated. Gameplay remains available after an analysis error.
 
-**Hint** highlights the first action of a discovered winning path without making the move. Analysis includes the identities of face-down cards. Changing the board cancels its old search and invalidates its hint; old worker results cannot update the new position.
+**Hint** highlights the first action of a discovered winning path without making the move. Analysis includes the identities of face-down cards. Changing the board stops its loop and invalidates its hint while retaining its search state. Ordinary moves and Undo reuse the worker and session; a new deal releases the previous handle. Deal identifiers and board revisions prevent old worker responses from updating the displayed position.
 
 After victory, **Another deal** starts the same game with a different random seed. **New Game** opens the game/seed selector. **Undo last move** returns to the position before victory. Closing the results lets you inspect the final board. There is no persistence or automatic solution playback.
 
@@ -77,7 +77,7 @@ The script:
 
 1. Resolves the configured Wasm compiler and package tool.
 2. Adds any `~/.ghc-wasm` helper tools and checks for `wasm-opt`.
-3. Runs `scripts/build-bindgen.sh`, which installs the submodule's bindgen executable into `build/tools/` using native GHC.
+3. Runs `scripts/build-bindgen.sh`, which builds the pinned `k-kozika/ghc-wasm-bindgen` fork (`3a0b5dd`) from the submodule and installs its executable into `build/tools/` using native GHC. No local patch is applied.
 4. Creates local command wrappers/symlinks for bindgen and prepends `build/tools/` to `PATH`.
 5. Runs `ghc-wasm-bindgen build src/Solitaire/Wasm.hs --name solitaire --out web/src/generated/solitaire`.
 
@@ -149,7 +149,7 @@ bun run build
 bun run test
 ```
 
-`build` regenerates Wasm, checks TypeScript, and bundles the application and module worker. `test` checks seed parsing, legal selections, session accounting, worker cancellation and stale-result handling, card motion, and board layout. It also exercises all games through the generated Wasm facade and replays the winning path for Klondike seed 7, so run the build before testing.
+`build` regenerates Wasm, checks TypeScript, and bundles the application and module worker. `test` checks seed parsing, legal selections, session accounting, worker cancellation and stale-result handling, reference disposal, card motion, and board layout. It also exercises all games through the generated Wasm facade, replays the winning path for Klondike seed 7, and checks opaque solver references and exception handling, so run the build before testing.
 
 ## Troubleshooting
 

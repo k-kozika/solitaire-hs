@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import * as api from "../src/generated/solitaire/solitaire.js";
+import type { Board } from "../src/game.ts";
 import { loadEngine } from "../src/engine.ts";
 import {
   advanceSession,
@@ -115,4 +116,76 @@ test("Klondike seed 7 has a legal winning hint path within the default budget", 
 
   expect(session.board).toStrictEqual(engine.newGame("klondike", 7n));
   expect(session.turns).toBe(0);
+});
+
+test("Wasm solver references preserve states, resume, reuse solution suffixes and validate lifetimes", () => {
+  const owned = new Set<{ dispose(): void }>();
+  const own = <T extends { dispose(): void }>(ref: T): T => { owned.add(ref); return ref; };
+  const dispose = (ref: { dispose(): void }) => { ref.dispose(); owned.delete(ref); };
+  const probe = (solver: api.Solver, budget: number): api.SearchProgress => {
+    const step = api.advanceSolver(budget, solver);
+    try { return api.stepProgress(step); }
+    finally { step.dispose(); }
+  };
+  const advance = (solver: api.Solver, budget: number): [api.SearchProgress, api.Solver] => {
+    const step = api.advanceSolver(budget, solver);
+    try {
+      const progress = api.stepProgress(step);
+      const next = own(api.stepSolver(step));
+      dispose(solver);
+      return [progress, next];
+    } finally { step.dispose(); }
+  };
+  const select = (board: Board, solver: api.Solver): api.Solver => {
+    const next = own(api.selectSolverBoard(board, solver));
+    dispose(solver);
+    return next;
+  };
+  const initial = engine.newGame("klondike", 7n);
+  try {
+    const original = own(api.createSolver("klondike", initial));
+    const second = own(api.createSolver("klondike", initial));
+    const step = own(api.advanceSolver(32, original));
+    expect(api.stepProgress(step)).toEqual({ $tag: "Searching", contents: 32 });
+    let first = own(api.stepSolver(step));
+    const independentlyOwned = own(api.stepSolver(step));
+    expect(independentlyOwned).not.toBe(first);
+    expect(() => api.advanceSolver(1, step as unknown as api.Solver)).toThrow(TypeError);
+    expect(() => api.stepProgress(first as unknown as api.SolverStep)).toThrow(TypeError);
+    dispose(step);
+    expect(() => api.stepProgress(step)).toThrow(TypeError);
+    expect(probe(original, 0)).toEqual({ $tag: "Searching", contents: 0 });
+    expect(probe(independentlyOwned, 0)).toEqual({ $tag: "Searching", contents: 32 });
+    dispose(independentlyOwned);
+    dispose(original);
+
+    const moved = engine.applyAction("klondike", initial, engine.legalActions("klondike", initial)[0]);
+    first = select(moved, first);
+    let progress: api.SearchProgress;
+    [progress, first] = advance(first, 1);
+    expect(progress.$tag).toBe("Searching");
+    first = select(initial, first);
+    expect(probe(first, 0)).toEqual({ $tag: "Searching", contents: 32 });
+    [progress, first] = advance(first, 128);
+    for (let i = 0; progress.$tag === "Searching" && i < 100; i++)
+      [progress, first] = advance(first, 128);
+    expect(progress.$tag).toBe("Finished");
+    if (progress.$tag !== "Finished" || progress.contents[0].$tag !== "Solved")
+      throw new Error("Expected a cached solution");
+    const actions = progress.contents[0].contents;
+    const middle = engine.applyAction("klondike", initial, actions[0]);
+    first = select(middle, first);
+    expect(probe(first, 0)).toEqual({
+      $tag: "Finished", contents: [{ $tag: "Solved", contents: actions.slice(1) }, 0],
+    });
+    expect(probe(second, 0)).toEqual({ $tag: "Searching", contents: 0 });
+    dispose(first);
+    expect(() => first.dispose()).not.toThrow();
+    expect(() => api.advanceSolver(1, first)).toThrow(TypeError);
+    expect(() => api.selectSolverBoard(initial, first)).toThrow(TypeError);
+    expect(() => api.createSolver("missing", initial)).toThrow(api.HaskellError);
+    expect(probe(second, 0)).toEqual({ $tag: "Searching", contents: 0 });
+  } finally {
+    for (const ref of owned) ref.dispose();
+  }
 });

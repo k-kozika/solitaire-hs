@@ -27,12 +27,17 @@ type Board = Map<Pile, Entry[]>
 // applyAction(gameId: string, board: Board, action: Action): Either<string, Board>
 // legalActions(gameId: string, board: Board): Either<string, Action[]>
 // won(gameId: string, board: Board): Either<string, boolean>
+// createSolver(gameId: string, board: Board): Solver
+// selectSolverBoard(board: Board, solver: Solver): Solver
+// advanceSolver(budget: number, solver: Solver): SolverStep
+// stepProgress(step: SolverStep): SearchProgress
+// stepSolver(step: SolverStep): Solver
 // solve(budget: number, gameId: string, board: Board): Either<string, SearchResult>
 // pileCards(board: Board, pile: Pile): Entry[]
 // pilesIn(group: Group, board: Board): Pile[]
 ```
 
-`games()` returns ID/display-name pairs for the shared game catalog. IDs are exact and case-sensitive here, unlike the terminal interfaces. An unknown ID returns `Left` from functions that resolve a game.
+`games()` returns ID/display-name pairs for the shared game catalog. IDs are exact and case-sensitive here, unlike the terminal interfaces. An unknown ID returns `Left` from functions that resolve a game, except `createSolver`, which throws `HaskellError`.
 
 Use a board only with its corresponding game ID. The facade does not associate an ID with a returned board or perform complete board validation on every call.
 
@@ -132,10 +137,60 @@ type SearchResult =
 
 The `Solved.contents` array is already in execution order. Replay it with `applyAction` and the same game ID. `LimitReached` means the expansion budget was consumed, not that the game is unwinnable. See [solver semantics](solver.md) for budget accounting and search limitations.
 
-`solve` blocks the calling thread until it returns. For a browser UI, initialize the module and perform search in a Web Worker. The frontend's [analysis worker](../web/src/analysis.worker.ts) and [client](../web/src/analysis.ts) implement this: requests carry the game ID, board, and board revision; stale replies are ignored and busy workers are terminated when the position changes or the search deadline expires. See [browser gameplay](web-wasm.md#playing-in-the-browser) for the UI behavior and default search limits.
+`solve` blocks the calling thread until it returns. For a browser UI, initialize the module and perform search in a Web Worker. The frontend's [analysis worker](../web/src/analysis.worker.ts) and [client](../web/src/analysis.ts) implement this: requests carry the deal ID, game ID, board, and board revision. The worker advances a retained solver in small slices; position changes stop the loop while preserving its state, and stale replies are ignored. New deals release the old handle. A five-second silence watchdog terminates an unresponsive worker. See [browser gameplay](web-wasm.md#playing-in-the-browser) for the UI behavior and default search limits.
 
 ## Errors and generated declarations
 
-Rule rejections and facade validation use `Either`. Module loading and marshalling can fail separately; the generated module also exports `HaskellError`. Do not assume a `Left` branch handles every runtime or loading failure.
+Rule rejections and facade validation use `Either`, except that `createSolver` throws `HaskellError` for an unknown game. Module loading and marshalling can fail separately; the generated module also exports `HaskellError`. Do not assume a `Left` branch handles every runtime or loading failure.
 
 The generated `solitaire.d.ts` is the precise declaration of the built artifact. If Haskell exports or the pinned bindgen implementation change, regenerate and check those declarations before changing consumers. Do not edit generated bindings by hand.
+
+## Solver references
+
+`createSolver` creates a session with the common default `SolverLimits` (8 starting
+boards, 100,000 entries). `Solver` and `SolverStep` are opaque references owned by
+the JavaScript caller. Bindgen retains their Haskell values inside Wasm without
+serializing the search state. There is no application registry or IO in this
+facade. The session's definition stays fixed; `selectSolverBoard` takes no game ID.
+
+```ts
+let solver = solitaire.createSolver('klondike', board)
+try {
+  const step = solitaire.advanceSolver(32, solver)
+  try {
+    const progress = solitaire.stepProgress(step)
+    const next = solitaire.stepSolver(step)
+    solver.dispose()
+    solver = next
+    console.log(progress)
+  } finally {
+    step.dispose()
+  }
+  const selected = solitaire.selectSolverBoard(previousBoard, solver) // e.g. Undo
+  solver.dispose()
+  solver = selected
+} finally {
+  solver.dispose()
+}
+```
+
+Progress is `{ $tag: 'Searching', contents: expanded }`,
+`{ $tag: 'Finished', contents: [result, expanded] }`, or
+`{ $tag: 'RetentionLimit', contents: expanded }`. A finished result contains only
+`Solved` or `Exhausted`; a retention stop remains undetermined. Counts are cumulative
+per selected starting board. `advanceSolver` completes the slice before returning
+its `SolverStep`. It wraps the pure solver's `(SearchProgress, Solver)` pair because
+bindgen supports opaque references only as direct function arguments and results.
+
+Calls borrow their input references and return independently owned references;
+they do not mutate the input state. `stepSolver` remains usable after its step is
+disposed. Dispose replaced solver references, each temporary step, and the current
+solver on a new deal. Repeated `dispose()` calls are harmless. Disposed references,
+wrong opaque types and references from another Wasm instance throw `TypeError`.
+Bindgen also has a `FinalizationRegistry` fallback, whose timing is not guaranteed.
+There is no persistence; references stay inside the worker that created them.
+
+The build uses [k-kozika/ghc-wasm-bindgen](https://github.com/k-kozika/ghc-wasm-bindgen)
+at `3a0b5dd6023460ae0d50f94df724fa641314a60b` without a local patch. Its generated
+bindings manage `StablePtr` retention and release internally with IO, while all
+application exports remain pure. Evaluation failures become `HaskellError`.

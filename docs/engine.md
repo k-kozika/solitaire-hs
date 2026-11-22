@@ -69,7 +69,7 @@ Automatic rules run as an ordered pass, not a general fixed-point calculation. A
 
 ## Enumerate legal transitions
 
-`legalTransitions` tries `Draw` and candidate moves through `applyAction`, retaining only successful results. Candidate moves use the contiguous face-up prefix of each source pile and routes allowed by the transfer selectors. Overlapping transfer rules do not duplicate an action.
+`legalTransitions` tries `Draw` and candidate moves through the same action validation as `applyAction`, retaining only successful results. Candidates are bounded by the matching rules: one card for `Single`, the contiguous face-up prefix for `AnyFaceUp`, and the ordered prefix for `Run`. `ByVacancies` additionally caps the count using available cells and columns, excluding the source and destination. Vacancy counts are computed once per board and shared across candidate generation and validation. Overlapping transfer rules remain additive and do not duplicate an action.
 
 `legalActions` returns only the actions from these transitions. Use `legalTransitions` when the successor boards are needed, as in the solver, to avoid calculating each result again.
 

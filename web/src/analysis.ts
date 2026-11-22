@@ -1,18 +1,16 @@
 import { classifyResult } from "./game";
-import type { Analysis, Board, SearchResult } from "./game";
+import type { Analysis, Board } from "./game";
+import type { SearchProgress } from "./generated/solitaire/solitaire.js";
 
-export const SEARCH_BUDGET = 3500;
 export const SEARCH_TIMEOUT_MS = 5000;
-export type SearchRequest = {
-  revision: number;
-  gameId: string;
-  board: Board;
-  budget: number;
-};
+export type SearchRequest =
+  | { type: "select"; dealId: number; revision: number; gameId: string; board: Board }
+  | { type: "cancel"; dealId: number }
+  | { type: "reset" };
 export type SearchMessage =
   | { type: "ready" }
-  | { type: "result"; revision: number; result: SearchResult }
-  | { type: "error"; revision?: number; message: string };
+  | { type: "progress"; dealId: number; revision: number; progress: SearchProgress }
+  | { type: "error"; dealId?: number; revision?: number; message: string };
 
 export interface SearchWorker {
   onmessage: ((event: MessageEvent<SearchMessage>) => void) | null;
@@ -21,15 +19,17 @@ export interface SearchWorker {
   terminate(): void;
 }
 
-// A busy synchronous Wasm search can only be cancelled by terminating its worker.
 export class AnalysisClient {
   private worker: SearchWorker | null = null;
   private ready = false;
+  private dealId = 0;
+  private gameId?: string;
   private pending: {
-    request: SearchRequest;
+    request: Extract<SearchRequest, { type: "select" }>;
     receive: (analysis: Analysis) => void;
   } | null = null;
   private timer: ReturnType<typeof setTimeout> | undefined;
+
   private factory: () => SearchWorker;
   private timeoutMs: number;
 
@@ -38,91 +38,92 @@ export class AnalysisClient {
     this.timeoutMs = timeoutMs;
   }
 
-  search(
-    gameId: string,
-    board: Board,
-    revision: number,
-    receive: (analysis: Analysis) => void,
-  ): void {
-    if (this.pending) this.cancel();
-    this.pending = {
-      request: { gameId, board, revision, budget: SEARCH_BUDGET },
-      receive,
-    };
+  // A new deal discards the old handle even when game and seed are unchanged.
+  newDeal(): void {
+    this.cancel();
+    this.dealId++;
+    this.gameId = undefined;
+    if (this.ready) {
+      try { this.worker?.postMessage({ type: "reset" }); }
+      catch { this.dispose(); }
+    }
+  }
+
+  search(gameId: string, board: Board, revision: number, receive: (analysis: Analysis) => void): void {
+    if (this.gameId !== undefined && this.gameId !== gameId) this.newDeal();
+    this.cancel();
+    this.gameId = gameId;
+    this.pending = { request: { type: "select", dealId: this.dealId, gameId, board, revision }, receive };
     receive({ status: "analyzing" });
-    if (this.worker && this.ready) {
-      this.dispatch();
+    if (this.worker) {
+      if (this.ready) this.dispatch();
       return;
     }
     try {
       const worker = this.factory();
       this.worker = worker;
-      worker.onmessage = (event) => {
+      worker.onmessage = ({ data: message }) => {
         if (this.worker !== worker) return;
-        const message = event.data;
         if (message.type === "ready") {
           clearTimeout(this.timer);
           this.ready = true;
           this.dispatch();
-        } else if (
-          this.pending &&
-          ((message.type === "error" && message.revision === undefined) ||
-            message.revision === this.pending.request.revision)
-        ) {
+        } else if (message.type === "error" && message.revision === undefined) {
+          this.fail(message.message);
+        } else if (this.pending && message.dealId === this.pending.request.dealId &&
+                   message.revision === this.pending.request.revision) {
           if (message.type === "error") this.fail(message.message);
-          else if (message.type === "result")
-            this.finish(classifyResult(message.result));
+          else if (message.type === "progress") {
+            const progress = message.progress;
+            if (progress.$tag === "Searching") this.watchdog();
+            else {
+              clearTimeout(this.timer);
+              const receive = this.pending.receive;
+              this.pending = null;
+              receive(progress.$tag === "Finished"
+                ? classifyResult(progress.contents[0])
+                : { status: "unknown", reason: "Retention limit reached; the result is undetermined." });
+            }
+          }
         }
       };
       worker.onerror = () => {
-        if (this.worker === worker)
-          this.fail("The analysis worker could not run. You can keep playing.");
+        if (this.worker === worker) this.fail("The analysis worker could not run. You can keep playing.");
       };
-      // Loading has its own deadline; search time is counted after Wasm is ready.
-      this.timer = setTimeout(
-        () =>
-          this.fail(
-            "The analysis worker could not load. You can keep playing.",
-          ),
-        15000,
-      );
+      this.timer = setTimeout(() => this.fail("The analysis worker could not load. You can keep playing."), 15000);
     } catch (error) {
-      this.fail(
-        error instanceof Error ? error.message : "Analysis could not start.",
-      );
+      this.fail(error instanceof Error ? error.message : "Analysis could not start.");
     }
+  }
+
+  private watchdog(): void {
+    clearTimeout(this.timer);
+    this.timer = setTimeout(() => this.fail("The analysis worker stopped responding. You can keep playing."), this.timeoutMs);
   }
 
   private dispatch(): void {
     if (!this.pending || !this.worker) return;
-    this.timer = setTimeout(() => {
-      const receive = this.pending?.receive;
-      this.cancel();
-      receive?.({ status: "unknown", reason: "Search time limit reached." });
-    }, this.timeoutMs);
-    try {
-      this.worker.postMessage(this.pending.request);
-    } catch {
-      this.fail(
-        "The board could not be sent for analysis. You can keep playing.",
-      );
-    }
-  }
-
-  private finish(analysis: Analysis): void {
-    clearTimeout(this.timer);
-    const receive = this.pending?.receive;
-    this.pending = null;
-    receive?.(analysis);
+    this.watchdog();
+    try { this.worker.postMessage(this.pending.request); }
+    catch { this.fail("The board could not be sent for analysis. You can keep playing."); }
   }
 
   private fail(reason: string): void {
     const receive = this.pending?.receive;
-    this.cancel();
+    this.dispose();
     receive?.({ status: "error", reason });
   }
 
   cancel(): void {
+    if (this.ready) clearTimeout(this.timer);
+    this.pending = null;
+    if (this.ready) {
+      try { this.worker?.postMessage({ type: "cancel", dealId: this.dealId }); }
+      catch { this.dispose(); }
+    }
+  }
+
+  dispose(): void {
     clearTimeout(this.timer);
     this.pending = null;
     this.worker?.terminate();

@@ -1,32 +1,15 @@
 import type { SearchMessage, SearchRequest } from "./analysis";
+import { AnalysisRunner } from "./analysis-runner";
 
 const scope = globalThis as unknown as {
   onmessage: (event: MessageEvent<SearchRequest>) => void;
   postMessage(message: SearchMessage): void;
 };
-
 try {
-  const { solve } = await import("./generated/solitaire/solitaire.js");
-  scope.onmessage = ({ data }) => {
-    try {
-      const result = solve(data.budget, data.gameId, data.board);
-      scope.postMessage(
-        "Left" in result
-          ? { type: "error", revision: data.revision, message: result.Left }
-          : { type: "result", revision: data.revision, result: result.Right },
-      );
-    } catch (error) {
-      scope.postMessage({
-        type: "error",
-        revision: data.revision,
-        message: error instanceof Error ? error.message : "Analysis failed.",
-      });
-    }
-  };
+  const api = await import("./generated/solitaire/solitaire.js");
+  const runner = new AnalysisRunner(api, (message) => scope.postMessage(message));
+  scope.onmessage = ({ data }) => runner.receive(data);
   scope.postMessage({ type: "ready" });
 } catch {
-  scope.postMessage({
-    type: "error",
-    message: "The analysis engine could not load. You can keep playing.",
-  });
+  scope.postMessage({ type: "error", message: "The analysis engine could not load. You can keep playing." });
 }

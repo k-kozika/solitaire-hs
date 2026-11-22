@@ -69,7 +69,7 @@ fmap (\board -> pileCards board (Pile Stock 1)) initial
 | [src/Solitaire/Games.hs](../src/Solitaire/Games.hs) | Game IDs and the shared game catalog |
 | [src/Solitaire/Games/](../src/Solitaire/Games/) | Individual game definitions |
 | [src/Solitaire/Solver.hs](../src/Solitaire/Solver.hs) | Bounded search over engine transitions |
-| [src/Solitaire/Wasm.hs](../src/Solitaire/Wasm.hs) | Pure facade exported through bindgen |
+| [src/Solitaire/Wasm.hs](../src/Solitaire/Wasm.hs) | Pure engine facade and opaque solver references exported through bindgen |
 | [app/Main.hs](../app/Main.hs) | Interactive terminal interface |
 | [app/Solve.hs](../app/Solve.hs) | Solver command-line interface |
 | [scripts/](../scripts/) | Bindgen and Wasm build scripts |

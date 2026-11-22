@@ -153,12 +153,16 @@ push :: Pile -> [Entry] -> Board -> Board
 push pile entries = Map.adjust (entries ++) pile
 
 applyAction :: Definition -> Board -> Action -> Either String Board
-applyAction def board action = settle (automatic def) <$> case action of
-  Draw -> applyStock (stockRule def) board
-  Move count source target -> applyMove (transfers def) board count source target
+applyAction def board = applyActionWithVacancies def (countVacancies board) board
 
-applyMove :: [Transfer] -> Board -> Int -> Pile -> Pile -> Either String Board
-applyMove rules board count source target = do
+-- Share these counts across all candidates when enumerating a board.
+applyActionWithVacancies :: Definition -> Map.Map Group Int -> Board -> Action -> Either String Board
+applyActionWithVacancies def vacancies board action = settle (automatic def) <$> case action of
+  Draw -> applyStock (stockRule def) board
+  Move count source target -> applyMove vacancies (transfers def) board count source target
+
+applyMove :: Map.Map Group Int -> [Transfer] -> Board -> Int -> Pile -> Pile -> Either String Board
+applyMove vacancies rules board count source target = do
   unless (source /= target && all (`Map.member` board) [source, target])
     (Left "Choose two different piles on this board.")
   unless (count > 0 && length selected == count) (Left "Invalid number of cards.")
@@ -167,7 +171,7 @@ applyMove rules board count source target = do
       matching = [ (limit, placement)
                  | Transfer from to limit placement <- rules
                  , matches from source, matches to target ]
-      movable = filter (\(limit, _) -> fitsLimit limit board source target stack) matching
+      movable = filter (\(limit, _) -> fitsLimit vacancies limit board source target stack) matching
   unless (not (null matching)) (Left "This route is unavailable.")
   unless (not (null movable)) (Left "This stack cannot be moved together.")
   case stack of
@@ -181,16 +185,32 @@ applyMove rules board count source target = do
     visible (Entry Up card) = Right card
     visible (Entry Down _) = Left "Face-down cards cannot be moved."
 
-fitsLimit :: MoveLimit -> Board -> Pile -> Pile -> [Card] -> Bool
-fitsLimit Single _ _ _ cards = length cards == 1
-fitsLimit AnyFaceUp _ _ _ _ = True
-fitsLimit (Run order) _ _ _ cards = ordered order cards
-fitsLimit (ByVacancies order cells columns) board source target cards =
-  ordered order cards && toInteger (length cards) <= capacity
+countVacancies :: Board -> Map.Map Group Int
+countVacancies = Map.foldlWithKey' count Map.empty
   where
-    vacant group = length [pile | pile <- pilesIn group board,
-                           pile /= source, pile /= target, null (pileCards board pile)]
-    capacity = (1 + toInteger (vacant cells)) * 2 ^ vacant columns
+    count counts (Pile group _) [] = Map.insertWith (+) group 1 counts
+    count counts _ _ = counts
+
+moveCapacity :: Map.Map Group Int -> Board -> Pile -> Pile -> Group -> Group -> Integer
+moveCapacity vacancies board source target cells columns =
+  (1 + toInteger (vacant cells)) * 2 ^ vacant columns
+  where
+    vacant group = Map.findWithDefault 0 group vacancies - excluded source group - excluded target group
+    excluded pile group = fromEnum (pileGroup pile == group && null (pileCards board pile))
+
+fitsLimit :: Map.Map Group Int -> MoveLimit -> Board -> Pile -> Pile -> [Card] -> Bool
+fitsLimit _ Single _ _ _ cards = length cards == 1
+fitsLimit _ AnyFaceUp _ _ _ _ = True
+fitsLimit _ (Run order) _ _ _ cards = ordered order cards
+fitsLimit vacancies (ByVacancies order cells columns) board source target cards =
+  ordered order cards &&
+  toInteger (length cards) <= moveCapacity vacancies board source target cells columns
+
+-- Cards here are in exposed-first order, the reverse of a build sequence.
+runLength :: Sequence -> [Card] -> Int
+runLength _ [] = 0
+runLength order (top : rest) =
+  1 + length (takeWhile id (zipWith (follows order) rest (top : rest)))
 
 fits :: Placement -> Card -> [Entry] -> Bool
 fits EmptyOnly _ entries = null entries
@@ -274,17 +294,32 @@ legalActions def board = map fst (legalTransitions def board)
 
 legalTransitions :: Definition -> Board -> [(Action, Board)]
 legalTransitions def board =
-  [(action, next) | action <- Draw : moves, Right next <- [applyAction def board action]]
+  [(action, next) | action <- Draw : moves,
+                    Right next <- [applyActionWithVacancies def vacancies board action]]
   where
-    routes = [(from, to) | Transfer from to _ _ <- transfers def]
+    vacancies = countVacancies board
+    piles = Map.keys board
     moves = [ Move count source target
             | (source, entries) <- Map.toList board
-            , let visibleCount = length (takeWhile exposed entries)
-            , visibleCount > 0
-            , target <- Map.keys board
+            , let visible = [card | Entry Up card <- takeWhile exposed entries]
+            , not (null visible)
+            , let visibleCount = length visible
+                  bound Single = 1
+                  bound AnyFaceUp = visibleCount
+                  bound (Run order) = runLength order visible
+                  bound (ByVacancies order _ _) = runLength order visible
+                  routes = [(to, limit, bound limit)
+                           | Transfer from to limit _ <- transfers def, matches from source]
+            , target <- piles
             , source /= target
-            , any (\(from, to) -> matches from source && matches to target) routes
-            , count <- [1 .. visibleCount] ]
+            , let maxCount = maximum (0 :
+                    [case limit of
+                       ByVacancies _ cells columns -> fromInteger
+                         (min (toInteger countBound)
+                           (moveCapacity vacancies board source target cells columns))
+                       _ -> countBound
+                    | (to, limit, countBound) <- routes, matches to target])
+            , count <- [1 .. maxCount] ]
     exposed (Entry face _) = face == Up
 
 won :: Definition -> Board -> Bool

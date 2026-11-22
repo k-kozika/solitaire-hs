@@ -19,6 +19,7 @@ extra-doc-files:
     docs/*.md
 extra-source-files:
     scripts/*.sh
+    scripts/*.hs
 
 common shared
     default-language: Haskell2010

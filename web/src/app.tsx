@@ -75,7 +75,7 @@ export function App() {
       });
     return () => {
       disposed = true;
-      client.current?.cancel();
+      client.current?.dispose();
     };
   }, []);
 
@@ -159,6 +159,7 @@ export function App() {
   function start(gameId: string, seed: bigint) {
     if (!engine) return;
     const name = catalog.find(([id]) => id === gameId)?.[1] ?? gameId;
+    client.current?.newDeal();
     commit(
       createSession(
         engine,
@@ -306,7 +307,9 @@ export function App() {
               >
                 <Icon name={analysisIcons[analysis.status]} size={15} />
               </span>
-              <strong>{analysisLabels[analysis.status]}</strong>
+              <strong>{analysis.status === "unknown" && analysis.reason
+                ? analysis.reason
+                : analysisLabels[analysis.status]}</strong>
             </div>
           </div>
           <div class="toolbar-right">

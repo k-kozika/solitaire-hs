@@ -5,7 +5,7 @@ import Data.List (nub, sort)
 import qualified Data.Map.Strict as Map
 import Solitaire.Engine
 import Solitaire.Games (freecell, games, golf, grandfathersClock, klondike, spider, yukon)
-import Solitaire.Solver (SearchResult(..), solve)
+import Solitaire.Solver
 import qualified Solitaire.Wasm as Wasm
 import System.Exit (die)
 
@@ -14,6 +14,7 @@ main = do
   initialDeals
   fixedDeals
   selectors
+  transitionEnumeration
   klondikeRules
   spiderRules
   freecellRules
@@ -23,6 +24,8 @@ main = do
   winningMoves
   solverLimits
   solveInitialDeal
+  solverSessions
+  wasmSessions
   wasmApi
   putStrLn "All solitaire checks passed."
 
@@ -145,6 +148,66 @@ selectors = do
   forM_ (legalTransitions overlap board) $ \(move, next) ->
     check "Enumerated transitions use the same rules as execution" $
       applyAction overlap board move == Right next
+
+-- Brute-force execution is independent of the candidate-generation bounds.
+-- Compare complete transitions in order: search tie-breaking depends on it.
+transitionEnumeration :: IO ()
+transitionEnumeration = do
+  forM_ games $ \(name, def) ->
+    forM_ [0, 7, 42] $ \seed -> do
+      initial <- succeed (newGame def seed)
+      _ <- foldM (walk name def) initial [0 .. 39 :: Int]
+      pure ()
+  let descending = Descending AlternatingColors Linear
+      cyclic = Descending AnySuit Cyclic
+      board = Map.fromList
+        [(tableau 1, [up Ace Clubs, up Two Hearts, up Three Clubs,
+                      up Seven Hearts, Entry Down (Card King Spades)])
+        ,(tableau 2, [up Four Hearts]), (tableau 3, [])
+        ,(tableau 4, [up King Hearts, up Ace Spades, up Two Hearts])
+        ,(Pile Cell 1, []), (Pile Cell 2, [up Five Clubs])]
+      route limit = Transfer (GroupPiles Tableau) (GroupPiles Tableau) limit
+                      (Build descending Nothing)
+      limits = [Single, AnyFaceUp, Run descending, Run cyclic,
+                ByVacancies descending Cell Tableau,
+                ByVacancies descending Tableau Cell]
+  forM_ limits $ \limit ->
+    verifyTransitions "Custom move limit" (freecell {transfers = [route limit]}) board
+  let overlap = freecell {transfers =
+        [route Single, route (Run descending), route AnyFaceUp, route AnyFaceUp]}
+  verifyTransitions "Overlapping move limits" overlap board
+  let vacancies = freecell {transfers =
+        [Transfer (GroupPiles Tableau) (GroupPiles Cell)
+          (ByVacancies descending Cell Tableau) EmptyOnly]}
+  verifyTransitions "Vacant cell destination is excluded" vacancies board
+  check "A vacant cell destination cannot also increase the move capacity" $
+    Move 3 (tableau 1) (Pile Cell 1) `notElem` legalActions vacancies board &&
+    Move 2 (tableau 1) (Pile Cell 1) `elem` legalActions vacancies board
+  let cyclicDef = freecell {transfers =
+        [Transfer (GroupPiles Tableau) (GroupPiles Tableau) (Run cyclic)
+          (Build cyclic Nothing)]}
+      cyclicBoard = Map.insert (tableau 2) [up Three Clubs] board
+  verifyTransitions "Cyclic run bounds" cyclicDef cyclicBoard
+  check "Run candidates include a sequence crossing King and Ace" $
+    Move 3 (tableau 4) (tableau 2) `elem` legalActions cyclicDef cyclicBoard
+  where
+    walk name def board step = do
+      verifyTransitions name def board
+      case legalTransitions def board of
+        [] -> pure board
+        transitions -> pure (snd (transitions !! (step `mod` length transitions)))
+
+verifyTransitions :: String -> Definition -> Board -> IO ()
+verifyTransitions name def board =
+  check (name ++ " transitions match brute-force execution in order") $
+    legalTransitions def board ==
+      [(action, next) | action <- Draw : moves,
+                        Right next <- [applyAction def board action]]
+  where
+    moves = [Move count source target
+            | (source, entries) <- Map.toList board
+            , target <- Map.keys board, source /= target
+            , count <- [1 .. length entries]]
 
 klondikeRules :: IO ()
 klondikeRules = do
@@ -430,3 +493,97 @@ rejected = either (const True) (const False)
 
 check :: String -> Bool -> IO ()
 check description condition = unless condition (die ("FAILED: " ++ description))
+
+solverSessions :: IO ()
+solverSessions = do
+  let a = Map.fromList [(tableau 1, [up Five Hearts, up Six Clubs]),
+                        (waste, [up Four Spades]), (stock, [])]
+      b = Map.insert (tableau 1) [up Ten Hearts] a
+      fresh = newSolver defaultSolverLimits golf a
+      (first, saved) = advance 1 fresh
+      (batch, batchSolver) = advance 2 fresh
+      (split, splitSolver) = advance 1 saved
+  check "Zero and negative session budgets leave an unfinished search untouched" $
+    fst (advance 0 fresh) == Searching 0 && fst (advance (-4) fresh) == Searching 0
+  check "Splitting budgets preserves result, path, expansion count and generated work" $
+    first == Searching 1 && split == batch &&
+    transitionGenerations (solverStats splitSolver) ==
+      transitionGenerations (solverStats batchSolver)
+  check "Completed searches remain completed without spending more budget" $
+    fst (advance 100 splitSolver) == split
+  let other = selectBoard b saved
+      (otherResult, otherDone) = advance 1 other
+      resumed = selectBoard a otherDone
+  check "A to B to A resumes A without sharing B's visited set" $
+    otherResult == Finished Exhausted 1 &&
+    fst (advance 0 resumed) == Searching 1 && fst (advance 1 resumed) == batch
+  middle <- succeed (applyAction golf a (Move 1 (tableau 1) waste))
+  let (reuse, reused) = advance 0 (selectBoard middle batchSolver)
+  check "A solved path registers the remaining actions on intermediate boards" $
+    reuse == Finished (Solved [Move 1 (tableau 1) waste]) 0 &&
+    transitionGenerations (solverStats reused) == transitionGenerations (solverStats batchSolver)
+  let evicted = selectBoard a (selectBoard b
+        (snd (advance 1 (newSolver (SolverLimits 1 1000) golf a))))
+  check "Old inactive searches are evicted whole and restart safely" $
+    retainedSearches (solverStats evicted) == 1 &&
+    fst (advance 0 evicted) == Searching 0 && fst (advance 2 evicted) == batch
+  let tiny = newSolver (SolverLimits 8 2) golf a
+      (stopped, intact) = advance 100 tiny
+  check "Retention rejects an entire expansion and preserves its prior state" $
+    stopped == RetentionLimit 0 && fst (advance 0 intact) == Searching 0 &&
+    fst (advance 1 intact) == stopped && retainedEntries (solverStats intact) == 2
+  let onlyDraw = klondike {deckSuits = [Spades], initialDeal = [], transfers = []}
+  cycleBoard <- succeed (newGame onlyDraw 42)
+  let cycleStart = newSolver defaultSolverLimits onlyDraw cycleBoard
+      chunks 0 current = advance 0 current
+      chunks n current = case advance 1 current of
+        (Searching _, next) -> chunks (n - 1 :: Int) next
+        done -> done
+  check "Chunked cycles exhaust only after the complete reachable space" $
+    fst (chunks 20 cycleStart) == fst (advance 20 cycleStart) &&
+    fst (advance 1 cycleStart) == Searching 1
+  let twoCycle = Map.fromList [(stock, [Entry Down (Card Ace Spades)]), (waste, [])]
+      (cycleFirst, cycleSaved) = advance 1 (newSolver defaultSolverLimits onlyDraw twoCycle)
+  cycleNext <- succeed (applyAction onlyDraw twoCycle Draw)
+  let (independent, nextSaved) = advance 1 (selectBoard cycleNext cycleSaved)
+  check "Overlapping cyclic searches keep independent visited sets" $
+    cycleFirst == Searching 1 && independent == Searching 1 &&
+    fst (advance 0 (selectBoard twoCycle nextSaved)) == Searching 1 &&
+    fst (advance 1 (selectBoard twoCycle nextSaved)) == Finished Exhausted 2
+  let (_, combined) = advance 1 (selectBoard twoCycle nextSaved)
+  check "Independent roots share generated transitions without repeating expansion work" $
+    transitionGenerations (solverStats combined) == 2
+  let (_, smallSaved) = advance 1 (newSolver (SolverLimits 8 5) onlyDraw twoCycle)
+      (_, smallOther) = advance 1 (selectBoard cycleNext smallSaved)
+      (smallResult, smallAgain) = advance 1 (selectBoard twoCycle smallOther)
+  check "Old shared cache entries can be evicted and regenerated without false exhaustion" $
+    smallResult == Searching 1 && transitionGenerations (solverStats smallAgain) == 3 &&
+    retainedEntries (solverStats smallAgain) <= 5
+  let (_, cycleDone) = advance 10 cycleSaved
+  check "Exhaustive proof can resolve a different root without expansions" $
+    fst (advance 0 (selectBoard cycleNext cycleDone)) == Finished Exhausted 0
+  let boundedCycle = newSolver (SolverLimits 8 5) onlyDraw cycleBoard
+  check "A bounded cycle never reports false exhaustion" $ case fst (advance 100 boundedCycle) of
+    RetentionLimit _ -> True
+    _ -> False
+  initial <- succeed (newGame klondike 7)
+  let (whole, _) = advance 3500 (newSolver (SolverLimits 8 1000000) klondike initial)
+      byChunks current = case advance 32 current of
+        (Searching _, next) -> byChunks next
+        (result, _) -> result
+  check "Seeded initial deal has identical chunked and batch solution and budget use" $
+    whole == byChunks (newSolver (SolverLimits 8 1000000) klondike initial)
+
+wasmSessions :: IO ()
+wasmSessions = do
+  let a = Map.fromList [(tableau 1, [up Five Hearts, up Six Clubs]),
+                        (waste, [up Four Spades]), (stock, [])]
+      initial = Wasm.createSolver "golf" a
+      first = Wasm.advanceSolver 1 initial
+      second = Wasm.advanceSolver 0 initial
+      saved = Wasm.stepSolver first
+      resumed = Wasm.advanceSolver 0 (Wasm.selectSolverBoard a saved)
+  check "Wasm pure solver steps keep the original state unchanged" $
+    Wasm.stepProgress first == Searching 1 && Wasm.stepProgress second == Searching 0
+  check "Wasm board selection resumes the returned state" $
+    Wasm.stepProgress resumed == Wasm.stepProgress first
