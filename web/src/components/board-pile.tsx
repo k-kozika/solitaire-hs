@@ -18,6 +18,7 @@ export function BoardPile({
   pile,
   selection,
   hint,
+  disabled = false,
   onCard,
   onDraw,
 }: {
@@ -25,6 +26,7 @@ export function BoardPile({
   pile: Pile;
   selection: Selection | null;
   hint: Action | null;
+  disabled?: boolean;
   onCard: (pile: Pile, count: number) => void;
   onDraw: () => void;
 }) {
@@ -72,7 +74,7 @@ export function BoardPile({
           <button
             type="button"
             class={`empty-slot ${hintDraw ? "is-hint" : ""}`}
-            disabled={stock ? !drawAvailable : !target}
+            disabled={disabled || (stock ? !drawAvailable : !target)}
             aria-label={
               stock
                 ? "Recycle stock"
@@ -135,8 +137,8 @@ export function BoardPile({
                   ? { top: `calc(${position} * var(--card-overlap))` }
                   : undefined
               }
-              disabled={!enabled}
-              data-drag-count={movable ? count : undefined}
+              disabled={disabled || !enabled}
+              data-drag-count={!disabled && movable ? count : undefined}
               data-card-position={cardPosition(
                 pileKey(pile),
                 entries.length - index - 1,

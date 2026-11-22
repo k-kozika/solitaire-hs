@@ -9,16 +9,19 @@ import "./new-game-dialog.css";
 export function NewGameDialog({
   catalog,
   current,
+  demoMode,
   onStart,
   onClose,
 }: {
   catalog: [string, string][];
   current: Session | null;
-  onStart: (id: string, seed: bigint) => void;
+  demoMode: boolean;
+  onStart: (id: string, seed: bigint, demoMode: boolean) => void;
   onClose?: () => void;
 }) {
   const [gameId, setGameId] = useState(current?.gameId ?? catalog[0][0]);
   const [seedText, setSeedText] = useState("");
+  const [demo, setDemo] = useState(demoMode);
   const [error, setError] = useState("");
   const seedRef = useRef<HTMLInputElement>(null);
   const submit = (event: TargetedSubmitEvent<HTMLFormElement>) => {
@@ -32,7 +35,7 @@ export function NewGameDialog({
       return;
     }
     try {
-      onStart(gameId, seed ?? randomSeed(current?.seed));
+      onStart(gameId, seed ?? randomSeed(current?.seed), demo);
     } catch (error) {
       setError(
         error instanceof Error ? error.message : "The deal could not start.",
@@ -87,6 +90,16 @@ export function NewGameDialog({
         <p class="form-error" id="seed-error" role="alert">
           {error}
         </p>
+        <label class="demo-mode" for="demo-mode">
+          <input
+            id="demo-mode"
+            name="demo-mode"
+            type="checkbox"
+            checked={demo}
+            onChange={(event) => setDemo(event.currentTarget.checked)}
+          />
+          Demo mode
+        </label>
         <button class="button button-primary start-button" type="submit">
           Start <Icon name="arrow" />
         </button>

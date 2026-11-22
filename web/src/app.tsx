@@ -34,6 +34,7 @@ export function App() {
   const [catalog, setCatalog] = useState<[string, string][]>([]);
   const [loadError, setLoadError] = useState("");
   const [session, setSession] = useState<Session | null>(null);
+  const [demoMode, setDemoMode] = useState(false);
   const sessionRef = useRef<Session | null>(null);
   const [dialog, setDialog] = useState<"new" | "win" | null>("new");
   const [selection, setSelection] = useState<Selection | null>(null);
@@ -99,6 +100,34 @@ export function App() {
   }, [session]);
 
   useEffect(() => {
+    if (
+      !demoMode ||
+      !engine ||
+      !session ||
+      dialog ||
+      error ||
+      session.finishedAt !== null ||
+      analysis.status !== "solved" ||
+      !analysis.path.length
+    )
+      return;
+    const revision = session.revision;
+    const action = analysis.path[0];
+    const timer = setTimeout(() => {
+      const current = sessionRef.current;
+      if (!current || current.revision !== revision) return;
+      try {
+        commit(advanceSession(engine, current, action));
+      } catch (error) {
+        setError(
+          error instanceof Error ? error.message : "The demo could not continue.",
+        );
+      }
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [demoMode, engine, session, dialog, analysis, error]);
+
+  useEffect(() => {
     if (!session || session.finishedAt !== null) return;
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
@@ -136,7 +165,7 @@ export function App() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [engine, dialog]);
+  }, [engine, dialog, demoMode]);
 
   function commit(next: Session) {
     client.current?.cancel();
@@ -156,7 +185,7 @@ export function App() {
     setDialog(next.finishedAt !== null ? "win" : null);
   }
 
-  function start(gameId: string, seed: bigint) {
+  function start(gameId: string, seed: bigint, demo = demoMode) {
     if (!engine) return;
     const name = catalog.find(([id]) => id === gameId)?.[1] ?? gameId;
     client.current?.newDeal();
@@ -169,12 +198,13 @@ export function App() {
         (sessionRef.current?.revision ?? 0) + 1,
       ),
     );
+    setDemoMode(demo);
     requestAnimationFrame(() => tableTitleRef.current?.focus());
   }
 
   function play(action: Action) {
     const current = sessionRef.current;
-    if (!engine || !current || dialog) return;
+    if (!engine || !current || dialog || demoMode) return;
     try {
       commit(advanceSession(engine, current, action));
     } catch (error) {
@@ -188,6 +218,7 @@ export function App() {
     const current = sessionRef.current;
     if (
       !engine ||
+      demoMode ||
       !current?.history.length ||
       dialog === "new" ||
       dragRef.current
@@ -205,7 +236,7 @@ export function App() {
   }
 
   function choose(pile: Pile, count: number) {
-    if (suppressClick.current || !session || dialog) return;
+    if (suppressClick.current || !session || dialog || demoMode) return;
     if (selection) {
       const action = moveTo(session.actions, selection, pile);
       if (action) {
@@ -225,7 +256,7 @@ export function App() {
   }
 
   function activateDrag(pile: Pile, count: number) {
-    if (!session || dialog) return;
+    if (!session || dialog || demoMode) return;
     const next = { pile, count };
     dragRef.current = { selection: next, revision: session.revision };
     setSelection(next);
@@ -252,7 +283,12 @@ export function App() {
   }
 
   function showHint() {
-    if (analysis.status !== "solved" || !analysis.path.length || !session)
+    if (
+      demoMode ||
+      analysis.status !== "solved" ||
+      !analysis.path.length ||
+      !session
+    )
       return;
     setSelection(null);
     setHint(analysis.path[0]);
@@ -269,7 +305,7 @@ export function App() {
   const analysisLabels = {
     idle: "Choose a deal to begin",
     analyzing: "Analyzing…",
-    solved: "Winning path found",
+    solved: "Winable",
     impossible: "No winning path",
     unknown: "Unable to determine",
     error: "Analysis unavailable",
@@ -282,6 +318,14 @@ export function App() {
     unknown: "question-mark",
     error: "exclamation-mark",
   } as const;
+  const demoPlaying =
+    demoMode && analysis.status === "solved" && session?.finishedAt === null;
+  const analysisLabel =
+    analysis.status === "unknown" && analysis.reason
+      ? analysis.reason
+      : demoPlaying
+        ? "Playing…"
+        : analysisLabels[analysis.status];
   const selectionText = selection
     ? `${selection.count} card${selection.count === 1 ? "" : "s"} selected.`
     : "";
@@ -305,11 +349,14 @@ export function App() {
                 class={`status-symbol status-${analysis.status}`}
                 aria-hidden="true"
               >
-                <Icon name={analysisIcons[analysis.status]} size={15} />
+                <Icon
+                  name={demoPlaying ? "bot" : analysisIcons[analysis.status]}
+                  size={15}
+                />
               </span>
-              <strong>{analysis.status === "unknown" && analysis.reason
-                ? analysis.reason
-                : analysisLabels[analysis.status]}</strong>
+              <strong>
+                {demoMode && "Demo mode · "}{analysisLabel}
+              </strong>
             </div>
           </div>
           <div class="toolbar-right">
@@ -339,7 +386,7 @@ export function App() {
             session={session}
             selection={selection}
             hint={hint}
-            disabled={dialog !== null}
+            disabled={dialog !== null || demoMode}
             onCard={choose}
             onDraw={() => {
               const draw = session.actions.find(
@@ -400,7 +447,7 @@ export function App() {
               type="button"
               class="button button-table"
               onClick={undo}
-              disabled={!session?.history.length || dragging}
+              disabled={demoMode || !session?.history.length || dragging}
               title="Undo (Ctrl/Cmd+Z)"
               aria-keyshortcuts="Control+z Meta+z"
             >
@@ -411,7 +458,7 @@ export function App() {
               type="button"
               class="button button-table"
               onClick={showHint}
-              disabled={!hintAvailable}
+              disabled={demoMode || !hintAvailable}
             >
               <Icon name="hint" size={16} />
               Hint
@@ -436,6 +483,7 @@ export function App() {
         <NewGameDialog
           catalog={catalog}
           current={session}
+          demoMode={demoMode}
           onStart={start}
           onClose={
             session
@@ -462,6 +510,7 @@ export function App() {
           }}
           onClose={() => setDialog(null)}
           onUndo={undo}
+          undoDisabled={demoMode}
         />
       )}
     </main>

@@ -4,7 +4,8 @@ import type { Card, Session } from "./game";
 type CardMotion = {
   target: string;
   source?: string;
-  kind: "initial" | "deal" | "flip";
+  sourceCard?: string;
+  kind: "initial" | "deal" | "move" | "flip";
   fromDown: boolean;
   toDown: boolean;
   duration: number;
@@ -17,6 +18,24 @@ const sameCard = (a: Card, b: Card) => a.rank === b.rank && a.suit === b.suit;
 // does not change the identity of the other slots, even in a two-deck game.
 export const cardPosition = (pile: string, depth: number) => `${pile}@${depth}`;
 
+export type CardPositions = Map<string, { left: number; top: number }>;
+
+export function captureCardPositions(
+  root: HTMLElement,
+  layer: HTMLElement,
+): CardPositions {
+  const bounds = layer.getBoundingClientRect();
+  return new Map(
+    [...root.querySelectorAll<HTMLElement>("[data-card-position]")].map((card) => {
+      const rect = card.getBoundingClientRect();
+      return [
+        card.dataset.cardPosition!,
+        { left: rect.left - bounds.left, top: rect.top - bounds.top },
+      ];
+    }),
+  );
+}
+
 export function planCardMotions(
   previous: Session | null,
   next: Session,
@@ -26,8 +45,36 @@ export function planCardMotions(
   const initial = !forward && !undo;
   const motions: CardMotion[] = [];
   const dealt: { card: Card; source: string; order: number }[] = [];
+  const moved: {
+    card: Card;
+    source: string;
+    sourceCard: string;
+    fromDown: boolean;
+  }[] = [];
 
   if (forward) {
+    for (const [pile, before] of previous.board) {
+      if (pile.contents[0] === "Stock") continue;
+      const after = entriesFor(next.board, pile);
+      // Match the unchanged bottom of each pile, ignoring newly revealed faces.
+      let retained = 0;
+      while (
+        retained < Math.min(before.length, after.length) &&
+        sameCard(
+          before[before.length - retained - 1].contents[1],
+          after[after.length - retained - 1].contents[1],
+        )
+      )
+        retained++;
+      before.slice(0, before.length - retained).forEach((entry, index) => {
+        moved.push({
+          card: entry.contents[1],
+          source: pileKey(pile),
+          sourceCard: cardPosition(pileKey(pile), before.length - index - 1),
+          fromDown: entry.contents[0] === "Down",
+        });
+      });
+    }
     for (const stock of pilesFor(previous.board, "Stock")) {
       const before = entriesFor(previous.board, stock);
       const after = entriesFor(next.board, stock);
@@ -79,6 +126,12 @@ export function planCardMotions(
         forward && !old
           ? dealt.findIndex((item) => sameCard(item.card, card))
           : -1;
+      const transfer =
+        forward && (!old || !sameCard(old.contents[1], card))
+          ? moved.findIndex(
+              (item) => item.source !== pileKey(pile) && sameCard(item.card, card),
+            )
+          : -1;
       if (incoming >= 0) {
         const [item] = dealt.splice(incoming, 1);
         motions.push({
@@ -89,6 +142,18 @@ export function planCardMotions(
           toDown: face === "Down",
           duration: 240,
           delay: item.order * 24,
+        });
+      } else if (transfer >= 0) {
+        const [item] = moved.splice(transfer, 1);
+        motions.push({
+          target,
+          source: item.source,
+          sourceCard: item.sourceCard,
+          kind: "move",
+          fromDown: item.fromDown,
+          toDown: face === "Down",
+          duration: 240,
+          delay: 0,
         });
       } else if (
         old &&
@@ -119,6 +184,7 @@ export function animateCardMotions(
   root: HTMLElement,
   layer: HTMLElement,
   motions: CardMotion[],
+  previousPositions: CardPositions = new Map(),
 ): () => void {
   const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
   const start: (() => void)[] = [];
@@ -139,8 +205,13 @@ export function animateCardMotions(
         )
       : null;
 
-    if (source && !reduced) {
-      const from = source.getBoundingClientRect();
+    const oldPosition = motion.sourceCard
+      ? previousPositions.get(motion.sourceCard)
+      : undefined;
+    const from = oldPosition
+      ? { left: oldPosition.left + bounds.left, top: oldPosition.top + bounds.top }
+      : source?.getBoundingClientRect();
+    if (from && !reduced) {
       const to = target.getBoundingClientRect();
       flight = document.createElement("div");
       flight.className = `card card-flight ${target.classList.contains("card-red") ? "card-red" : ""} ${target.closest(".tableau-stack") ? "card-flight-tableau" : ""}`;

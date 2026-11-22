@@ -96,7 +96,7 @@ describe("card motion planning", () => {
     );
   });
 
-  test("revealing a tableau card flips the same bottom slot without flipping the moved card", () => {
+  test("moving a card flies face up while the exposed card flips in place", () => {
     const other = pile("Tableau", 2);
     const before: Board = new Map([
       [tableau, [entry("Two"), entry("Ace", "Down")]],
@@ -107,12 +107,21 @@ describe("card motion planning", () => {
       [other, [entry("Two")]],
     ]);
     const motions = planCardMotions(session(before), session(after, [before]));
-    expect(motions).toHaveLength(1);
-    expect(motions[0]).toMatchObject({
+    expect(motions).toHaveLength(2);
+    expect(motions.find((motion) => motion.kind === "flip")).toMatchObject({
       kind: "flip",
       target: position(tableau, 0),
       fromDown: true,
       toDown: false,
+    });
+    expect(motions.find((motion) => motion.kind === "move")).toMatchObject({
+      target: position(other, 0),
+      source: "Tableau:1",
+      sourceCard: position(tableau, 1),
+      fromDown: false,
+      toDown: false,
+      duration: 240,
+      delay: 0,
     });
     const reversed = planCardMotions(session(after, [before]), session(before));
     expect(reversed).toHaveLength(1);
@@ -122,6 +131,72 @@ describe("card motion planning", () => {
       fromDown: false,
       toDown: true,
     });
+  });
+
+  test("a stack moves together from each original card position", () => {
+    const other = pile("Tableau", 2);
+    const before: Board = new Map([
+      [tableau, [entry("Ace"), entry("Two"), entry("Ace", "Down")]],
+      [other, [entry("Two")]],
+    ]);
+    const after: Board = new Map([
+      [tableau, [entry("Ace")]],
+      [other, [entry("Ace"), entry("Two"), entry("Two")]],
+    ]);
+    const moves = planCardMotions(session(before), session(after, [before])).filter(
+      (motion) => motion.kind === "move",
+    );
+    expect(moves).toHaveLength(2);
+    expect(moves.map((motion) => [motion.sourceCard, motion.target])).toEqual([
+      [position(tableau, 2), position(other, 2)],
+      [position(tableau, 1), position(other, 1)],
+    ]);
+    expect(
+      moves.every((motion) => motion.delay === 0 && !motion.fromDown && !motion.toDown),
+    ).toBe(true);
+  });
+
+  test("duplicate cards already in the destination stay still", () => {
+    const other = pile("Tableau", 2);
+    const before: Board = new Map([
+      [tableau, [entry("Ace")]],
+      [other, [entry("Ace")]],
+    ]);
+    const after: Board = new Map([
+      [tableau, []],
+      [other, [entry("Ace"), entry("Ace")]],
+    ]);
+    const motions = planCardMotions(session(before), session(after, [before]));
+    expect(motions).toHaveLength(1);
+    expect(motions[0]).toMatchObject({
+      kind: "move",
+      sourceCard: position(tableau, 0),
+      target: position(other, 1),
+    });
+  });
+
+  test("moves from waste to foundation keep their original position and face", () => {
+    const foundation = pile("Foundation");
+    const before: Board = new Map([
+      [waste, [entry("Ace"), entry("Two")]],
+      [foundation, []],
+    ]);
+    const after: Board = new Map([
+      [waste, [entry("Two")]],
+      [foundation, [entry("Ace")]],
+    ]);
+    expect(planCardMotions(session(before), session(after, [before]))).toEqual([
+      {
+        kind: "move",
+        target: position(foundation, 0),
+        source: "Waste:1",
+        sourceCard: position(waste, 1),
+        fromDown: false,
+        toDown: false,
+        duration: 240,
+        delay: 0,
+      },
+    ]);
   });
 
   test("recycling and undoing a draw do not trigger an initial deal or draw animation", () => {

@@ -1,8 +1,13 @@
 import { useLayoutEffect, useRef, useState } from "preact/hooks";
 import { calculateBoardLayout } from "../board-layout";
-import { animateCardMotions, planCardMotions } from "../card-motion";
+import {
+  animateCardMotions,
+  captureCardPositions,
+  planCardMotions,
+} from "../card-motion";
+import type { CardPositions } from "../card-motion";
 import { mountCardDnd } from "../dnd";
-import { entriesFor, pileKey, pilesFor } from "../game";
+import { entriesFor, moveTo, pileKey, pilesFor } from "../game";
 import type { Pile, Selection, Session } from "../game";
 import { BoardPile } from "./board-pile";
 import { CardVisual } from "./card-visual";
@@ -33,6 +38,8 @@ export function Table({
   const previewRef = useRef<HTMLDivElement>(null);
   const motionRef = useRef<HTMLDivElement>(null);
   const previousSession = useRef<Session | null>(null);
+  const previousPositions = useRef<CardPositions>(new Map());
+  const draggedSession = useRef<Session | null>(null);
   const stopMotions = useRef<(() => void) | null>(null);
   const [preview, setPreview] = useState<Selection | null>(null);
   const callbacks = useRef({ onStart: onDrag, onEnd: onDragEnd, onDrop });
@@ -104,6 +111,8 @@ export function Table({
           getComputedStyle(source).getPropertyValue("--card-overlap"),
         );
     }
+    if (previousSession.current === session && motionRef.current)
+      previousPositions.current = captureCardPositions(root, motionRef.current);
   };
   // Also runs for selections/hints, whose messages can change the height budget.
   useLayoutEffect(() => {
@@ -128,13 +137,22 @@ export function Table({
     };
   }, []);
   useLayoutEffect(() => {
-    const motions = planCardMotions(previousSession.current, session);
+    const motions = planCardMotions(previousSession.current, session).filter(
+      (motion) =>
+        motion.kind !== "move" || draggedSession.current !== previousSession.current,
+    );
+    draggedSession.current = null;
     previousSession.current = session;
     if (!boardRef.current || !motionRef.current) return;
     const cleanup = animateCardMotions(
       boardRef.current,
       motionRef.current,
       motions,
+      previousPositions.current,
+    );
+    previousPositions.current = captureCardPositions(
+      boardRef.current,
+      motionRef.current,
     );
     stopMotions.current = cleanup;
     return cleanup;
@@ -142,10 +160,18 @@ export function Table({
   useLayoutEffect(() => {
     setPreview(null);
     if (disabled || !boardRef.current || !previewRef.current) return;
+    let dragged: Selection | null = null;
     return mountCardDnd(boardRef.current, previewRef.current, session, {
-      onStart: (pile, count) => callbacks.current.onStart(pile, count),
+      onStart: (pile, count) => {
+        dragged = { pile, count };
+        callbacks.current.onStart(pile, count);
+      },
       onEnd: () => callbacks.current.onEnd(),
-      onDrop: (pile) => callbacks.current.onDrop(pile),
+      onDrop: (pile) => {
+        if (dragged && moveTo(session.actions, dragged, pile))
+          draggedSession.current = session;
+        callbacks.current.onDrop(pile);
+      },
       onPreview: (value) => {
         if (value) stopMotions.current?.();
         setPreview(value);
@@ -153,7 +179,7 @@ export function Table({
     });
   }, [session, disabled]);
 
-  const props = { session, selection, hint, onCard, onDraw };
+  const props = { session, selection, hint, disabled, onCard, onDraw };
   const renderPile = (pile: Pile) => (
     <BoardPile key={pileKey(pile)} {...props} pile={pile} />
   );

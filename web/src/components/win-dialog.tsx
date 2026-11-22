@@ -10,12 +10,14 @@ export function WinDialog({
   onDeal,
   onClose,
   onUndo,
+  undoDisabled = false,
 }: {
   session: Session;
   onNew: () => void;
   onDeal: () => void;
   onClose: () => void;
   onUndo: () => void;
+  undoDisabled?: boolean;
 }) {
   return (
     <Modal titleId="win-title" className="win-modal" onClose={onClose}>
@@ -55,7 +57,7 @@ export function WinDialog({
         class="button button-text cancel-button"
         type="button"
         onClick={onUndo}
-        disabled={!session.history.length}
+        disabled={undoDisabled || !session.history.length}
       >
         <Icon name="undo" size={16} />
         Undo last move
